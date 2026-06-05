@@ -351,3 +351,25 @@ func TestHandler_CreateTransfer_400_IdempotencyKeyTooLong(t *testing.T) {
 		t.Fatalf("expected 400 for overlong idempotency key, got %d", rec.Code)
 	}
 }
+
+func TestHandler_CreateTransfer_409_DuplicateIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{executeErr: domain.ErrDuplicateIdempotencyKey}
+	body := handler.CreateTransferRequest{
+		IdempotencyKey: "conflict-key",
+		FromWalletID:   domain.NewID(),
+		ToWalletID:     domain.NewID(),
+		Amount:         100_00,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate idempotency key, got %d", rec.Code)
+	}
+}

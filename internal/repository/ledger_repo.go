@@ -11,11 +11,13 @@ import (
 )
 
 // ledgerRepo is the PostgreSQL implementation of LedgerRepository.
-type ledgerRepo struct{}
+type ledgerRepo struct {
+	log *slog.Logger
+}
 
 // NewLedgerRepo returns a LedgerRepository backed by PostgreSQL.
-func NewLedgerRepo(_ interface{}) LedgerRepository {
-	return &ledgerRepo{}
+func NewLedgerRepo(log *slog.Logger) LedgerRepository {
+	return &ledgerRepo{log: log}
 }
 
 func (r *ledgerRepo) CreateEntries(ctx context.Context, tx pgx.Tx, debit, credit domain.LedgerEntry) error {
@@ -26,7 +28,7 @@ func (r *ledgerRepo) CreateEntries(ctx context.Context, tx pgx.Tx, debit, credit
 	if _, err := tx.Exec(ctx, query,
 		debit.ID, debit.TransferID, debit.WalletID, int(debit.Type), int64(debit.Amount), debit.CreatedAt,
 	); err != nil {
-		slog.Error("ledger debit insert failed", "layer", "repo", "error", err, "transferID", debit.TransferID)
+		r.log.Error("ledger debit insert failed", "layer", "repo", "error", err, "transferID", debit.TransferID)
 
 		return fmt.Errorf("repo: create debit entry: %w", err)
 	}
@@ -34,7 +36,7 @@ func (r *ledgerRepo) CreateEntries(ctx context.Context, tx pgx.Tx, debit, credit
 	if _, err := tx.Exec(ctx, query,
 		credit.ID, credit.TransferID, credit.WalletID, int(credit.Type), int64(credit.Amount), credit.CreatedAt,
 	); err != nil {
-		slog.Error("ledger credit insert failed", "layer", "repo", "error", err, "transferID", credit.TransferID)
+		r.log.Error("ledger credit insert failed", "layer", "repo", "error", err, "transferID", credit.TransferID)
 
 		return fmt.Errorf("repo: create credit entry: %w", err)
 	}

@@ -191,6 +191,8 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrInvalidAmount),
 		errors.Is(err, domain.ErrSameWallet):
 		writeError(w, r, http.StatusBadRequest, err.Error())
+	case errors.Is(err, domain.ErrDuplicateIdempotencyKey):
+		writeError(w, r, http.StatusConflict, err.Error())
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal server error")
 	}

@@ -3,10 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -105,6 +108,12 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 
 	// ── 1. Idempotency fast-path ────────────────────────────────────────────
 	if cached, err := s.idem.Get(ctx, s.db, req.IdempotencyKey); err == nil {
+		// Detect key reuse with different parameters. An empty hash means the
+		// record predates conflict detection (treat as a valid match).
+		if cached.RequestHash != "" && cached.RequestHash != computeRequestHash(req) {
+			return TransferResponse{}, domain.ErrDuplicateIdempotencyKey
+		}
+
 		s.log.Info("idempotency cache hit",
 			"layer", "svc",
 			"idempotencyKey", req.IdempotencyKey,
@@ -168,7 +177,7 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 			_ = tx.Rollback(ctx)
 			err = nil // clear so the deferred rollback is a no-op
 
-			return s.waitForIdempotencyRecord(ctx, req.IdempotencyKey)
+			return s.waitForIdempotencyRecord(ctx, req)
 		}
 
 		err = fmt.Errorf("svc: create transfer: %w", createErr)
@@ -203,6 +212,14 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 
 	if ledgerErr := s.ledger.CreateEntries(ctx, tx, debit, credit); ledgerErr != nil {
 		err = fmt.Errorf("svc: create ledger entries: %w", ledgerErr)
+
+		return TransferResponse{}, err
+	}
+
+	// Enforce the domain state machine before persisting the status change.
+	if !domain.CanTransition(transfer.Status, domain.TransferStatusProcessed) {
+		err = fmt.Errorf("svc: %w: %s → %s",
+			domain.ErrInvalidTransition, transfer.Status, domain.TransferStatusProcessed)
 
 		return TransferResponse{}, err
 	}
@@ -244,6 +261,7 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 		TransferID:   transfer.ID,
 		ResponseJSON: string(respJSON),
 		StatusCode:   200,
+		RequestHash:  computeRequestHash(req),
 	}
 
 	if idemErr := s.idem.Create(ctx, tx, idemRecord); idemErr != nil {
@@ -331,7 +349,10 @@ func (s *TransferService) lockWallets(
 // waitForIdempotencyRecord retries the idempotency lookup with backoff to
 // handle the race where another goroutine won the INSERT but has not committed
 // yet. Returns as soon as the record is visible or after max retries.
-func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key string) (TransferResponse, error) {
+// It also checks for request-parameter conflicts.
+func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, req TransferRequest) (TransferResponse, error) {
+	reqHash := computeRequestHash(req)
+
 	for i := range idemMaxRetries {
 		if i > 0 {
 			select {
@@ -341,11 +362,16 @@ func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key stri
 			}
 		}
 
-		cached, err := s.idem.Get(ctx, s.db, key)
+		cached, err := s.idem.Get(ctx, s.db, req.IdempotencyKey)
 		if err == nil {
+			// Detect key reuse with different parameters.
+			if cached.RequestHash != "" && cached.RequestHash != reqHash {
+				return TransferResponse{}, domain.ErrDuplicateIdempotencyKey
+			}
+
 			s.log.Info("idempotency cache hit after race",
 				"layer", "svc",
-				"idempotencyKey", key,
+				"idempotencyKey", req.IdempotencyKey,
 				"transferID", cached.TransferID,
 				"attempt", i+1,
 			)
@@ -361,7 +387,7 @@ func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key stri
 		}
 	}
 
-	return TransferResponse{}, fmt.Errorf("svc: idempotency record not visible after race: key=%s", key)
+	return TransferResponse{}, fmt.Errorf("svc: idempotency record not visible after race: key=%s", req.IdempotencyKey)
 }
 
 // isUniqueViolation checks whether err is a PostgreSQL unique constraint
@@ -369,4 +395,19 @@ func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key stri
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// computeRequestHash returns a SHA-256 hex digest of the canonical transfer
+// request parameters (fromWalletID, toWalletID, amount). Stored alongside the
+// idempotency record so that key reuse with different parameters can be
+// detected and rejected.
+func computeRequestHash(req TransferRequest) string {
+	h := sha256.New()
+	h.Write([]byte(req.FromWalletID.String()))
+	h.Write([]byte("|"))
+	h.Write([]byte(req.ToWalletID.String()))
+	h.Write([]byte("|"))
+	h.Write([]byte(strconv.FormatInt(int64(req.Amount), 10)))
+
+	return hex.EncodeToString(h.Sum(nil))
 }

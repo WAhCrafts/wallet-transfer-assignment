@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -165,7 +166,7 @@ func (r *fakeIdempotencyRepo) Get(_ context.Context, _ repository.Querier, key s
 		return rec, nil
 	}
 
-	return repository.IdempotencyRecord{}, domain.ErrTransferNotFound
+	return repository.IdempotencyRecord{}, domain.ErrIdempotencyKeyNotFound
 }
 
 func (r *fakeIdempotencyRepo) Create(_ context.Context, _ pgx.Tx, rec repository.IdempotencyRecord) error {
@@ -596,5 +597,86 @@ func TestTransferService_CreateTransferFailure(t *testing.T) {
 	// No idempotency record must have been stored.
 	if _, getErr := idem.Get(ctx, nil, req.IdempotencyKey); getErr == nil {
 		t.Fatal("idempotency record must NOT be stored when transfer creation fails")
+	}
+}
+
+// TestTransferService_Execute_ConflictingIdempotencyKey asserts that reusing
+// an idempotency key with different request parameters returns
+// domain.ErrDuplicateIdempotencyKey rather than silently replaying the
+// original cached response.
+func TestTransferService_Execute_ConflictingIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	from := domain.NewWallet()
+	from.Balance = 500_00
+	to := domain.NewWallet()
+	other := domain.NewWallet()
+
+	wallets.wallets = map[uuid.UUID]domain.Wallet{
+		from.ID:  from,
+		to.ID:    to,
+		other.ID: other,
+	}
+
+	const key = "conflict-key-001"
+
+	// First request — should succeed.
+	_, err := svc.Execute(ctx, service.TransferRequest{
+		IdempotencyKey: key,
+		FromWalletID:   from.ID,
+		ToWalletID:     to.ID,
+		Amount:         100_00,
+	})
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+
+	// Second request with the same key but different parameters — must be rejected.
+	_, err = svc.Execute(ctx, service.TransferRequest{
+		IdempotencyKey: key,
+		FromWalletID:   from.ID,
+		ToWalletID:     other.ID, // different destination
+		Amount:         100_00,
+	})
+	if !errors.Is(err, domain.ErrDuplicateIdempotencyKey) {
+		t.Fatalf("expected ErrDuplicateIdempotencyKey for conflicting key reuse, got: %v", err)
+	}
+}
+
+// TestTransferService_Execute_StatusInCachedJSON verifies that the cached
+// TransferResponse JSON uses the human-readable status string ("PROCESSED"),
+// not an integer, so that it round-trips correctly through json.Unmarshal.
+func TestTransferService_Execute_StatusInCachedJSON(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, idem := newServiceWithFakes()
+	ctx := context.Background()
+
+	from := domain.NewWallet()
+	from.Balance = 500_00
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{from.ID: from, to.ID: to}
+
+	_, err := svc.Execute(ctx, service.TransferRequest{
+		IdempotencyKey: "json-status-001",
+		FromWalletID:   from.ID,
+		ToWalletID:     to.ID,
+		Amount:         50_00,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	rec, err := idem.Get(ctx, nil, "json-status-001")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// Status should be the string "PROCESSED", not the integer 2.
+	if !strings.Contains(rec.ResponseJSON, `"PROCESSED"`) {
+		t.Fatalf("cached JSON should contain human-readable status, got: %s", rec.ResponseJSON)
 	}
 }

@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
@@ -156,6 +157,45 @@ func TestNewWallet(t *testing.T) {
 	}
 	if w.Balance != 0 {
 		t.Fatalf("new wallet must have zero balance, got %d", w.Balance)
+	}
+}
+
+// TestTransferStatus_JSON verifies that TransferStatus marshals to a
+// human-readable string and round-trips correctly through JSON.
+func TestTransferStatus_JSON(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		status domain.TransferStatus
+		want   string
+	}{
+		{domain.TransferStatusPending, `"PENDING"`},
+		{domain.TransferStatusProcessed, `"PROCESSED"`},
+		{domain.TransferStatusFailed, `"FAILED"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.status.String(), func(t *testing.T) {
+			t.Parallel()
+
+			b, err := json.Marshal(tc.status)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+
+			if string(b) != tc.want {
+				t.Fatalf("MarshalJSON: got %s, want %s", b, tc.want)
+			}
+
+			var got domain.TransferStatus
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+
+			if got != tc.status {
+				t.Fatalf("round-trip: got %s, want %s", got, tc.status)
+			}
+		})
 	}
 }
 

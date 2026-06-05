@@ -57,10 +57,11 @@ func run() error {
 	defer pool.Close()
 
 	// ── Dependencies ─────────────────────────────────────────────────────────
-	walletRepo := repository.NewWalletRepo(pool)
-	transferRepo := repository.NewTransferRepo(pool)
-	ledgerRepo := repository.NewLedgerRepo(pool)
-	idemRepo := repository.NewIdempotencyRepo(pool)
+	log := slog.Default()
+	walletRepo := repository.NewWalletRepo(log)
+	transferRepo := repository.NewTransferRepo(log)
+	ledgerRepo := repository.NewLedgerRepo(log)
+	idemRepo := repository.NewIdempotencyRepo(log)
 
 	svc := service.NewTransferService(
 		pool,

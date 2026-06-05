@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestWalletRepo_CreateAndGet(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewWalletRepo(pool)
+	repo := repository.NewWalletRepo(slog.Default())
 
 	w := domain.NewWallet()
 	w.Balance = 500_00 // seed with 500.00
@@ -103,7 +104,7 @@ func TestWalletRepo_GetByID_NotFound(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewWalletRepo(pool)
+	repo := repository.NewWalletRepo(slog.Default())
 
 	_, err := repo.GetByID(ctx, pool, uuid.New())
 	if err == nil {
@@ -118,7 +119,7 @@ func TestWalletRepo_UpdateBalance(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewWalletRepo(pool)
+	repo := repository.NewWalletRepo(slog.Default())
 
 	w := domain.NewWallet()
 	w.Balance = 1000_00
@@ -165,8 +166,8 @@ func TestTransferRepo_CreateAndGet(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	walletRepo := repository.NewWalletRepo(pool)
-	transferRepo := repository.NewTransferRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
+	transferRepo := repository.NewTransferRepo(slog.Default())
 
 	from := domain.NewWallet()
 	from.Balance = 500_00
@@ -206,8 +207,8 @@ func TestTransferRepo_UpdateStatus(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	walletRepo := repository.NewWalletRepo(pool)
-	transferRepo := repository.NewTransferRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
+	transferRepo := repository.NewTransferRepo(slog.Default())
 
 	from := domain.NewWallet()
 	from.Balance = 500_00
@@ -260,9 +261,9 @@ func TestLedgerRepo_CreateEntries(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	walletRepo := repository.NewWalletRepo(pool)
-	transferRepo := repository.NewTransferRepo(pool)
-	ledgerRepo := repository.NewLedgerRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
+	transferRepo := repository.NewTransferRepo(slog.Default())
+	ledgerRepo := repository.NewLedgerRepo(slog.Default())
 
 	from := domain.NewWallet()
 	from.Balance = 500_00
@@ -309,9 +310,9 @@ func TestIdempotencyRepo_CreateAndGet(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	walletRepo := repository.NewWalletRepo(pool)
-	transferRepo := repository.NewTransferRepo(pool)
-	idemRepo := repository.NewIdempotencyRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
+	transferRepo := repository.NewTransferRepo(slog.Default())
+	idemRepo := repository.NewIdempotencyRepo(slog.Default())
 
 	from := domain.NewWallet()
 	from.Balance = 500_00
@@ -373,7 +374,7 @@ func TestIdempotencyRepo_Get_NotFound(t *testing.T) {
 
 	pool := newTestDB(t)
 	ctx := context.Background()
-	repo := repository.NewIdempotencyRepo(pool)
+	repo := repository.NewIdempotencyRepo(slog.Default())
 
 	_, err := repo.Get(ctx, pool, "missing-key")
 	if err == nil {

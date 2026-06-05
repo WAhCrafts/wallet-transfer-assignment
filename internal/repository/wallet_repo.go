@@ -13,11 +13,13 @@ import (
 )
 
 // walletRepo is the PostgreSQL implementation of WalletRepository.
-type walletRepo struct{}
+type walletRepo struct {
+	log *slog.Logger
+}
 
 // NewWalletRepo returns a WalletRepository backed by PostgreSQL.
-func NewWalletRepo(_ interface{}) WalletRepository {
-	return &walletRepo{}
+func NewWalletRepo(log *slog.Logger) WalletRepository {
+	return &walletRepo{log: log}
 }
 
 func (r *walletRepo) Create(ctx context.Context, q Querier, w domain.Wallet) error {
@@ -26,7 +28,7 @@ func (r *walletRepo) Create(ctx context.Context, q Querier, w domain.Wallet) err
 		VALUES ($1, $2, $3, $4, $5)`
 
 	if _, err := q.Exec(ctx, query, w.ID, int64(w.Balance), w.Version, w.CreatedAt, w.UpdatedAt); err != nil {
-		slog.Error("wallet create failed", "layer", "repo", "error", err, "walletID", w.ID)
+		r.log.Error("wallet create failed", "layer", "repo", "error", err, "walletID", w.ID)
 
 		return fmt.Errorf("repo: create wallet: %w", err)
 	}
@@ -58,7 +60,7 @@ func (r *walletRepo) UpdateBalance(ctx context.Context, tx pgx.Tx, id uuid.UUID,
 
 	tag, err := tx.Exec(ctx, query, int64(newBalance), id)
 	if err != nil {
-		slog.Error("wallet update balance failed", "layer", "repo", "error", err, "walletID", id)
+		r.log.Error("wallet update balance failed", "layer", "repo", "error", err, "walletID", id)
 
 		return fmt.Errorf("repo: update wallet balance: %w", err)
 	}

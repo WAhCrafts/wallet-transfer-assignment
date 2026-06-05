@@ -25,7 +25,11 @@ var (
 	// the transfer state machine.
 	ErrInvalidTransition = errors.New("invalid transfer state transition")
 
-	// ErrDuplicateIdempotencyKey is returned when an idempotency key is already
-	// in use by a different, conflicting request.
+	// ErrDuplicateIdempotencyKey is returned when an idempotency key is reused
+	// with different request parameters (different wallets or amount).
 	ErrDuplicateIdempotencyKey = errors.New("idempotency key already used with different parameters")
+
+	// ErrIdempotencyKeyNotFound is returned by the idempotency repository when
+	// no record exists for the given key.
+	ErrIdempotencyKeyNotFound = errors.New("idempotency key not found")
 )

@@ -77,10 +77,10 @@ func newRealService(pool *pgxpool.Pool) *service.TransferService {
 
 	return service.NewTransferService(
 		pool,
-		repository.NewWalletRepo(pool),
-		repository.NewTransferRepo(pool),
-		repository.NewLedgerRepo(pool),
-		repository.NewIdempotencyRepo(pool),
+		repository.NewWalletRepo(log),
+		repository.NewTransferRepo(log),
+		repository.NewLedgerRepo(log),
+		repository.NewIdempotencyRepo(log),
 		log,
 	)
 }
@@ -160,7 +160,7 @@ func TestConcurrentDebitsFromSameWallet(t *testing.T) {
 	wg.Wait()
 
 	// Verify final balances.
-	walletRepo := repository.NewWalletRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
 	fromFinal, err := walletRepo.GetByID(ctx, pool, from.ID)
 	if err != nil {
 		t.Fatalf("get from wallet: %v", err)
@@ -255,7 +255,7 @@ func TestIdempotentConcurrentRequests(t *testing.T) {
 	}
 
 	// Only one debit should have occurred.
-	walletRepo := repository.NewWalletRepo(pool)
+	walletRepo := repository.NewWalletRepo(slog.Default())
 	fromFinal, err := walletRepo.GetByID(ctx, pool, from.ID)
 	if err != nil {
 		t.Fatalf("get from wallet: %v", err)

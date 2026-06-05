@@ -60,4 +60,8 @@ type IdempotencyRecord struct {
 	TransferID   uuid.UUID
 	ResponseJSON string
 	StatusCode   int
+	// RequestHash is a SHA-256 fingerprint of the original request parameters
+	// (fromWalletID, toWalletID, amount). It is used to detect key reuse with
+	// conflicting parameters.
+	RequestHash string
 }

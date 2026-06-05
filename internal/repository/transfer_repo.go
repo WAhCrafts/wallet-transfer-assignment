@@ -13,11 +13,13 @@ import (
 )
 
 // transferRepo is the PostgreSQL implementation of TransferRepository.
-type transferRepo struct{}
+type transferRepo struct {
+	log *slog.Logger
+}
 
 // NewTransferRepo returns a TransferRepository backed by PostgreSQL.
-func NewTransferRepo(_ interface{}) TransferRepository {
-	return &transferRepo{}
+func NewTransferRepo(log *slog.Logger) TransferRepository {
+	return &transferRepo{log: log}
 }
 
 func (r *transferRepo) Create(ctx context.Context, q Querier, t domain.Transfer) error {
@@ -30,7 +32,7 @@ func (r *transferRepo) Create(ctx context.Context, q Querier, t domain.Transfer)
 		t.ID, t.IdempotencyKey, t.FromWalletID, t.ToWalletID,
 		int64(t.Amount), int(t.Status), t.CreatedAt, t.UpdatedAt,
 	); err != nil {
-		slog.Error("transfer create failed", "layer", "repo", "error", err, "transferID", t.ID)
+		r.log.Error("transfer create failed", "layer", "repo", "error", err, "transferID", t.ID)
 
 		return fmt.Errorf("repo: create transfer: %w", err)
 	}
@@ -51,7 +53,7 @@ func (r *transferRepo) UpdateStatus(ctx context.Context, tx pgx.Tx, id uuid.UUID
 
 	tag, err := tx.Exec(ctx, query, int(status), id)
 	if err != nil {
-		slog.Error("transfer update status failed", "layer", "repo", "error", err, "transferID", id)
+		r.log.Error("transfer update status failed", "layer", "repo", "error", err, "transferID", id)
 
 		return fmt.Errorf("repo: update transfer status: %w", err)
 	}

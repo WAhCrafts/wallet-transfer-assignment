@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // Amount represents a monetary value in the smallest currency unit (e.g. cents).
 // Using an integer type avoids floating-point rounding errors that are
 // unacceptable in financial calculations.
@@ -37,6 +42,40 @@ func (s TransferStatus) String() string {
 	default:
 		return "UNKNOWN"
 	}
+}
+
+// MarshalJSON encodes the status as a human-readable string so that API
+// responses carry "PENDING" / "PROCESSED" / "FAILED" rather than raw integers.
+func (s TransferStatus) MarshalJSON() ([]byte, error) {
+	str := s.String()
+	if str == "UNKNOWN" {
+		return nil, fmt.Errorf("unknown TransferStatus value: %d", int(s))
+	}
+
+	return json.Marshal(str)
+}
+
+// UnmarshalJSON decodes a human-readable status string back to its integer
+// constant. This is needed so the service can round-trip the cached
+// TransferResponse JSON stored in idempotency_records.
+func (s *TransferStatus) UnmarshalJSON(b []byte) error {
+	var str string
+	if err := json.Unmarshal(b, &str); err != nil {
+		return err
+	}
+
+	switch str {
+	case "PENDING":
+		*s = TransferStatusPending
+	case "PROCESSED":
+		*s = TransferStatusProcessed
+	case "FAILED":
+		*s = TransferStatusFailed
+	default:
+		return fmt.Errorf("unknown TransferStatus: %q", str)
+	}
+
+	return nil
 }
 
 // EntryType is an integer-coded ledger entry direction.
