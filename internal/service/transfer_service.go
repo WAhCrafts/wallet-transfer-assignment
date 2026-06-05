@@ -33,9 +33,10 @@ type TransferRequest struct {
 // TransferResponse is the result returned to the caller and cached for
 // idempotency replay.
 type TransferResponse struct {
-	TransferID uuid.UUID              `json:"id"`
-	Status     domain.TransferStatus  `json:"status"`
-	Amount     domain.Amount          `json:"amount"`
+	TransferID uuid.UUID             `json:"id"`
+	Status     domain.TransferStatus `json:"status"`
+	Amount     domain.Amount         `json:"amount"`
+	FromCache  bool                  `json:"-"` // true when served from idempotency cache
 }
 
 // TransferService orchestrates the wallet transfer workflow.
@@ -100,6 +101,8 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 		if jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp); jsonErr != nil {
 			return TransferResponse{}, fmt.Errorf("svc: unmarshal cached response: %w", jsonErr)
 		}
+
+		resp.FromCache = true
 
 		return resp, nil
 	}

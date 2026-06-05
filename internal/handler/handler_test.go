@@ -18,17 +18,26 @@ import (
 
 // ── Test doubles ─────────────────────────────────────────────────────────────
 
+// fakeTransferSvc lets individual tests control what each method returns.
 type fakeTransferSvc struct {
-	executeResp service.TransferResponse
-	executeErr  error
-	getTransfer domain.Transfer
-	getTransErr error
-	getWallet   domain.Wallet
-	getWalErr   error
+	executeResp  service.TransferResponse
+	executeErr   error
+	executeCount int
+	getTransfer  domain.Transfer
+	getTransErr  error
+	getWallet    domain.Wallet
+	getWalErr    error
 }
 
 func (f *fakeTransferSvc) Execute(_ context.Context, _ service.TransferRequest) (service.TransferResponse, error) {
-	return f.executeResp, f.executeErr
+	f.executeCount++
+	resp := f.executeResp
+	// Simulate idempotency cache hit on second-and-subsequent calls.
+	if f.executeCount > 1 {
+		resp.FromCache = true
+	}
+
+	return resp, f.executeErr
 }
 
 func (f *fakeTransferSvc) GetTransfer(_ context.Context, _ uuid.UUID) (domain.Transfer, error) {
@@ -110,6 +119,7 @@ func TestHandler_CreateTransfer_200_Idempotent(t *testing.T) {
 			Status:     domain.TransferStatusProcessed,
 		},
 	}
+	router := newRouter(svc) // shared router so executeCount accumulates
 
 	body := handler.CreateTransferRequest{
 		IdempotencyKey: "abc123",
@@ -118,23 +128,24 @@ func TestHandler_CreateTransfer_200_Idempotent(t *testing.T) {
 		Amount:         100_00,
 	}
 
-	// Simulate idempotent repeat by sending twice.
-	for i := range 2 {
-		req := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewReader(toJSON(t, body)))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+	// First call → 201 (new transfer).
+	req1 := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewReader(toJSON(t, body)))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
 
-		newRouter(svc).ServeHTTP(rec, req)
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("first call: expected 201, got %d", rec1.Code)
+	}
 
-		// First call → 201, subsequent calls with same key → 200.
-		want := http.StatusCreated
-		if i > 0 {
-			want = http.StatusOK
-		}
+	// Second call with same key → 200 (idempotent replay).
+	req2 := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewReader(toJSON(t, body)))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
 
-		if rec.Code != want {
-			t.Fatalf("call %d: expected %d, got %d", i, want, rec.Code)
-		}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second call: expected 200, got %d", rec2.Code)
 	}
 }
 
