@@ -5,12 +5,12 @@ BEGIN;
 
 -- ── wallets ──────────────────────────────────────────────────────────────────
 -- Stores wallet identity and running balance.
--- balance is kept as a stored denormalised sum alongside ledger entries for fast
--- reads; it is always updated atomically within the transfer transaction.
--- version supports optimistic-locking checks in application code.
+-- balance is stored in the smallest currency unit (minor units / cents) as a
+-- BIGINT to match the domain Amount type and avoid any floating-point concerns.
+-- version supports optimistic-locking guard in application code.
 CREATE TABLE wallets (
     id         UUID        PRIMARY KEY,
-    balance    NUMERIC(20, 4) NOT NULL DEFAULT 0
+    balance    BIGINT      NOT NULL    DEFAULT 0
                            CHECK (balance >= 0),
     version    BIGINT      NOT NULL    DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
@@ -23,16 +23,17 @@ CREATE TABLE wallets (
 -- requests with the same key race to insert; only one wins.
 -- status is stored as a SMALLINT matching TransferStatus domain constants:
 --   1 = PENDING, 2 = PROCESSED, 3 = FAILED
+-- amount is stored in minor units (same as balance) as BIGINT.
 CREATE TABLE transfers (
-    id               UUID           PRIMARY KEY,
-    idempotency_key  TEXT           NOT NULL,
-    from_wallet_id   UUID           NOT NULL REFERENCES wallets(id),
-    to_wallet_id     UUID           NOT NULL REFERENCES wallets(id),
-    amount           NUMERIC(20, 4) NOT NULL CHECK (amount > 0),
-    status           SMALLINT       NOT NULL DEFAULT 1
-                                    CHECK (status IN (1, 2, 3)),
-    created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    id               UUID        PRIMARY KEY,
+    idempotency_key  TEXT        NOT NULL,
+    from_wallet_id   UUID        NOT NULL REFERENCES wallets(id),
+    to_wallet_id     UUID        NOT NULL REFERENCES wallets(id),
+    amount           BIGINT      NOT NULL CHECK (amount > 0),
+    status           SMALLINT    NOT NULL DEFAULT 1
+                                 CHECK (status IN (1, 2, 3)),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_transfers_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT chk_different_wallets CHECK (from_wallet_id <> to_wallet_id)
 );
@@ -46,13 +47,14 @@ CREATE INDEX idx_transfers_status      ON transfers (status);
 -- type is stored as a SMALLINT matching EntryType domain constants:
 --   1 = DEBIT (money leaving a wallet)
 --   2 = CREDIT (money entering a wallet)
+-- amount is stored in minor units as BIGINT.
 CREATE TABLE ledger_entries (
-    id          UUID           PRIMARY KEY,
-    transfer_id UUID           NOT NULL REFERENCES transfers(id),
-    wallet_id   UUID           NOT NULL REFERENCES wallets(id),
-    type        SMALLINT       NOT NULL CHECK (type IN (1, 2)),
-    amount      NUMERIC(20, 4) NOT NULL CHECK (amount > 0),
-    created_at  TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+    id          UUID        PRIMARY KEY,
+    transfer_id UUID        NOT NULL REFERENCES transfers(id),
+    wallet_id   UUID        NOT NULL REFERENCES wallets(id),
+    type        SMALLINT    NOT NULL CHECK (type IN (1, 2)),
+    amount      BIGINT      NOT NULL CHECK (amount > 0),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_ledger_transfer ON ledger_entries (transfer_id);

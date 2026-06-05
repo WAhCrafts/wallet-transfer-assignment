@@ -2,8 +2,6 @@ package repository_test
 
 import (
 	"context"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -16,14 +14,8 @@ import (
 	"github.com/Robustrade/wallet-transfer-assignment/internal/db"
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
 	"github.com/Robustrade/wallet-transfer-assignment/internal/repository"
+	migrations "github.com/Robustrade/wallet-transfer-assignment/migrations"
 )
-
-// migrationsDir returns the absolute path to the migrations directory relative
-// to this test file.
-func migrationsDir() string {
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "..", "..", "migrations")
-}
 
 // newTestDB starts a throwaway PostgreSQL container, runs migrations, and
 // returns a pool pointed at it. The container is cleaned up when the test ends.
@@ -58,7 +50,7 @@ func newTestDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("get connection string: %v", err)
 	}
 
-	if err := db.Migrate(dsn, migrationsDir()); err != nil {
+	if err := db.Migrate(dsn, migrations.FS, "."); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
 
