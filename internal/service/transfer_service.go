@@ -17,9 +17,22 @@ import (
 	"github.com/Robustrade/wallet-transfer-assignment/internal/repository"
 )
 
-// DB is the subset of pgxpool.Pool the service needs — only Begin.
+// idempotency retry configuration.
+const (
+	// idemMaxRetries is the maximum number of times Execute will poll the
+	// idempotency_records table after losing the INSERT race to another goroutine.
+	idemMaxRetries = 10
+	// idemRetryDelay is the backoff pause between idempotency record polls.
+	idemRetryDelay = 50 * time.Millisecond
+	// MaxIdempotencyKeyLength is the maximum allowed length for an idempotency key.
+	// Enforced in the handler before reaching the service.
+	MaxIdempotencyKeyLength = 255
+)
+
+// DB is the subset of pgxpool.Pool the service needs.
 type DB interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 	repository.Querier
 }
 
@@ -109,7 +122,9 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 	}
 
 	// ── 2. Transactional transfer ───────────────────────────────────────────
-	tx, err := s.db.Begin(ctx)
+	// Use READ COMMITTED isolation with SELECT FOR UPDATE for safe balance updates.
+	// READ COMMITTED is the PostgreSQL default but we set it explicitly for clarity.
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return TransferResponse{}, fmt.Errorf("svc: begin transaction: %w", err)
 	}
@@ -317,17 +332,12 @@ func (s *TransferService) lockWallets(
 // handle the race where another goroutine won the INSERT but has not committed
 // yet. Returns as soon as the record is visible or after max retries.
 func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key string) (TransferResponse, error) {
-	const (
-		maxRetries = 10
-		retryDelay = 50 * time.Millisecond
-	)
-
-	for i := range maxRetries {
+	for i := range idemMaxRetries {
 		if i > 0 {
 			select {
 			case <-ctx.Done():
 				return TransferResponse{}, ctx.Err()
-			case <-time.After(retryDelay):
+			case <-time.After(idemRetryDelay):
 			}
 		}
 

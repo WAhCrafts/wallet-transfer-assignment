@@ -322,3 +322,32 @@ func TestHandler_CreateTransfer_400_BadJSON(t *testing.T) {
 		t.Fatalf("expected 400 for bad JSON, got %d", rec.Code)
 	}
 }
+
+func TestHandler_CreateTransfer_400_IdempotencyKeyTooLong(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{}
+
+	// Build a key that exceeds the 255-char limit.
+	key := make([]byte, service.MaxIdempotencyKeyLength+1)
+	for i := range key {
+		key[i] = 'a'
+	}
+
+	body := handler.CreateTransferRequest{
+		IdempotencyKey: string(key),
+		FromWalletID:   domain.NewID(),
+		ToWalletID:     domain.NewID(),
+		Amount:         100_00,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for overlong idempotency key, got %d", rec.Code)
+	}
+}

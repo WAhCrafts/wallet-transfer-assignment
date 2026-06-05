@@ -76,7 +76,8 @@ type TransferResponse struct {
 
 // errorResponse is the JSON body for all error responses.
 type errorResponse struct {
-	Error string `json:"error"`
+	RequestID string `json:"requestId,omitempty"`
+	Error     string `json:"error"`
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -85,13 +86,19 @@ type errorResponse struct {
 func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
 	var body CreateTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, r, http.StatusBadRequest, "invalid JSON body")
 
 		return
 	}
 
 	if body.IdempotencyKey == "" {
-		writeError(w, http.StatusBadRequest, "idempotencyKey is required")
+		writeError(w, r, http.StatusBadRequest, "idempotencyKey is required")
+
+		return
+	}
+
+	if len(body.IdempotencyKey) > service.MaxIdempotencyKeyLength {
+		writeError(w, r, http.StatusBadRequest, "idempotencyKey exceeds maximum length")
 
 		return
 	}
@@ -107,7 +114,7 @@ func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("create transfer failed", "layer", "handler", "error", err,
 			"idempotencyKey", body.IdempotencyKey)
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 
 		return
 	}
@@ -129,7 +136,7 @@ func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid transfer ID")
+		writeError(w, r, http.StatusBadRequest, "invalid transfer ID")
 
 		return
 	}
@@ -137,7 +144,7 @@ func (h *Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 	t, err := h.svc.GetTransfer(r.Context(), id)
 	if err != nil {
 		slog.Error("get transfer failed", "layer", "handler", "error", err, "transferID", id)
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 
 		return
 	}
@@ -153,7 +160,7 @@ func (h *Handler) getTransfer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid wallet ID")
+		writeError(w, r, http.StatusBadRequest, "invalid wallet ID")
 
 		return
 	}
@@ -161,7 +168,7 @@ func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 	wallet, err := h.svc.GetWallet(r.Context(), id)
 	if err != nil {
 		slog.Error("get wallet failed", "layer", "handler", "error", err, "walletID", id)
-		writeServiceError(w, err)
+		writeServiceError(w, r, err)
 
 		return
 	}
@@ -174,18 +181,18 @@ func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-func writeServiceError(w http.ResponseWriter, err error) {
+func writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, domain.ErrWalletNotFound),
 		errors.Is(err, domain.ErrTransferNotFound):
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, r, http.StatusNotFound, err.Error())
 	case errors.Is(err, domain.ErrInsufficientFunds):
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeError(w, r, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, domain.ErrInvalidAmount),
 		errors.Is(err, domain.ErrSameWallet):
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, r, http.StatusBadRequest, err.Error())
 	default:
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		writeError(w, r, http.StatusInternalServerError, "internal server error")
 	}
 }
 
@@ -198,6 +205,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, errorResponse{Error: msg})
+// writeError writes a JSON error response including the chi request ID for traceability.
+func writeError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	writeJSON(w, status, errorResponse{
+		RequestID: middleware.GetReqID(r.Context()),
+		Error:     msg,
+	})
 }

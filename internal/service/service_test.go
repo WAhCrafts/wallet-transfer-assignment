@@ -45,6 +45,12 @@ func (db *fakeDB) Begin(_ context.Context) (pgx.Tx, error) {
 	return db.tx, nil
 }
 
+func (db *fakeDB) BeginTx(_ context.Context, _ pgx.TxOptions) (pgx.Tx, error) {
+	db.tx = &fakeTx{}
+
+	return db.tx, nil
+}
+
 func (db *fakeDB) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { return nil }
 func (db *fakeDB) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
@@ -98,11 +104,16 @@ func (r *fakeWalletRepo) UpdateBalance(_ context.Context, _ pgx.Tx, id uuid.UUID
 
 // fakeTransferRepo tracks created transfers and allows UpdateStatus override.
 type fakeTransferRepo struct {
-	transfers    map[uuid.UUID]domain.Transfer
-	updateErr    error
+	transfers map[uuid.UUID]domain.Transfer
+	createErr error
+	updateErr error
 }
 
 func (r *fakeTransferRepo) Create(_ context.Context, _ repository.Querier, t domain.Transfer) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+
 	if r.transfers == nil {
 		r.transfers = make(map[uuid.UUID]domain.Transfer)
 	}
@@ -434,5 +445,156 @@ func TestTransferService_Execute_IdempotentResponse_JSON(t *testing.T) {
 
 	if decoded.TransferID != resp1.TransferID {
 		t.Fatal("cached JSON transfer ID must match original response")
+	}
+}
+
+// TestTransferService_LedgerInvariant verifies that each successful transfer
+// produces exactly one DEBIT and one CREDIT entry with equal amounts, and that
+// the total balances across both wallets are conserved.
+func TestTransferService_LedgerInvariant(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, ledger, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	from := domain.NewWallet()
+	from.Balance = 300_00
+	to := domain.NewWallet()
+
+	wallets.wallets = map[uuid.UUID]domain.Wallet{from.ID: from, to.ID: to}
+
+	const transferAmount domain.Amount = 75_00
+
+	_, err := svc.Execute(ctx, service.TransferRequest{
+		IdempotencyKey: "ledger-inv-001",
+		FromWalletID:   from.ID,
+		ToWalletID:     to.ID,
+		Amount:         transferAmount,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Exactly two entries must be produced.
+	if len(ledger.entries) != 2 {
+		t.Fatalf("expected 2 ledger entries, got %d", len(ledger.entries))
+	}
+
+	var (
+		totalDebit  domain.Amount
+		totalCredit domain.Amount
+	)
+
+	for _, e := range ledger.entries {
+		switch e.Type {
+		case domain.EntryTypeDebit:
+			totalDebit += e.Amount
+		case domain.EntryTypeCredit:
+			totalCredit += e.Amount
+		}
+	}
+
+	// Debit == Credit == transfer amount (double-entry invariant).
+	if totalDebit != transferAmount {
+		t.Fatalf("debit total %d != transfer amount %d", totalDebit, transferAmount)
+	}
+
+	if totalCredit != transferAmount {
+		t.Fatalf("credit total %d != transfer amount %d", totalCredit, transferAmount)
+	}
+
+	// Balance conservation: new_from + new_to == original_from + original_to.
+	newFrom := wallets.wallets[from.ID].Balance
+	newTo := wallets.wallets[to.ID].Balance
+
+	if newFrom+newTo != from.Balance+to.Balance {
+		t.Fatalf("balance conservation violated: %d + %d != %d + %d",
+			newFrom, newTo, from.Balance, to.Balance)
+	}
+
+	// Spot-check individual balances.
+	if newFrom != from.Balance-transferAmount {
+		t.Fatalf("sender balance: got %d, want %d", newFrom, from.Balance-transferAmount)
+	}
+
+	if newTo != to.Balance+transferAmount {
+		t.Fatalf("receiver balance: got %d, want %d", newTo, to.Balance+transferAmount)
+	}
+}
+
+// TestTransferService_UpdateBalanceFailure asserts that a failure mid-transaction
+// (e.g. UpdateBalance DB error) causes Execute to return an error and not store
+// an idempotency record — leaving the system as if no transfer occurred.
+func TestTransferService_UpdateBalanceFailure(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, idem := newServiceWithFakes()
+	ctx := context.Background()
+
+	dbErr := errors.New("db: disk full")
+
+	from := domain.NewWallet()
+	from.Balance = 500_00
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{from.ID: from, to.ID: to}
+
+	// Inject a DB error on UpdateBalance.
+	wallets.updateErr = dbErr
+
+	req := service.TransferRequest{
+		IdempotencyKey: "update-fail-001",
+		FromWalletID:   from.ID,
+		ToWalletID:     to.ID,
+		Amount:         100_00,
+	}
+
+	_, err := svc.Execute(ctx, req)
+	if err == nil {
+		t.Fatal("expected error when UpdateBalance fails, got nil")
+	}
+
+	// No idempotency record must have been stored.
+	if _, getErr := idem.Get(ctx, nil, req.IdempotencyKey); getErr == nil {
+		t.Fatal("idempotency record must NOT be stored when transfer fails")
+	}
+
+	// Sender balance must be unchanged.
+	if wallets.wallets[from.ID].Balance != from.Balance {
+		t.Fatal("sender balance must be unchanged on failure")
+	}
+}
+
+// TestTransferService_CreateTransferFailure checks that a Create error on the
+// transfer repo (e.g. constraint violation) propagates correctly and leaves no
+// idempotency record behind.
+func TestTransferService_CreateTransferFailure(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, transferRepo, _, idem := newServiceWithFakes()
+	ctx := context.Background()
+
+	from := domain.NewWallet()
+	from.Balance = 500_00
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{from.ID: from, to.ID: to}
+
+	// Force Create to fail.
+	transferRepo.createErr = errors.New("db: unexpected failure")
+
+	req := service.TransferRequest{
+		IdempotencyKey: "create-fail-001",
+		FromWalletID:   from.ID,
+		ToWalletID:     to.ID,
+		Amount:         50_00,
+	}
+
+	_, err := svc.Execute(ctx, req)
+	if err == nil {
+		t.Fatal("expected error when transfer Create fails, got nil")
+	}
+
+	// No idempotency record must have been stored.
+	if _, getErr := idem.Get(ctx, nil, req.IdempotencyKey); getErr == nil {
+		t.Fatal("idempotency record must NOT be stored when transfer creation fails")
 	}
 }
