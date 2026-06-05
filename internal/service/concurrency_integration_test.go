@@ -181,8 +181,8 @@ func TestConcurrentDebitsFromSameWallet(t *testing.T) {
 		t.Fatalf("from wallet went negative: %d", fromFinal.Balance)
 	}
 
-	expectedSuccesses := initialFromBalance / transferAmount
-	if domain.Amount(successes) != expectedSuccesses {
+	expectedSuccesses := int(initialFromBalance / transferAmount)
+	if successes != expectedSuccesses {
 		t.Fatalf("expected %d successes (max possible debits), got %d successes %d failures",
 			expectedSuccesses, successes, failures)
 	}

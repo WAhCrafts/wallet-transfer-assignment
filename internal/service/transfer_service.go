@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -145,6 +146,16 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 	transfer := domain.NewTransfer(req.FromWalletID, req.ToWalletID, req.IdempotencyKey, req.Amount)
 
 	if createErr := s.transfers.Create(ctx, tx, transfer); createErr != nil {
+		// A duplicate idempotency key means another goroutine won the race and
+		// already created this transfer. Roll back, then wait for that goroutine
+		// to commit and return its cached response.
+		if isUniqueViolation(createErr) {
+			_ = tx.Rollback(ctx)
+			err = nil // clear so the deferred rollback is a no-op
+
+			return s.waitForIdempotencyRecord(ctx, req.IdempotencyKey)
+		}
+
 		err = fmt.Errorf("svc: create transfer: %w", createErr)
 
 		return TransferResponse{}, err
@@ -300,6 +311,47 @@ func (s *TransferService) lockWallets(
 	}
 
 	return w2, w1, nil
+}
+
+// waitForIdempotencyRecord retries the idempotency lookup with backoff to
+// handle the race where another goroutine won the INSERT but has not committed
+// yet. Returns as soon as the record is visible or after max retries.
+func (s *TransferService) waitForIdempotencyRecord(ctx context.Context, key string) (TransferResponse, error) {
+	const (
+		maxRetries = 10
+		retryDelay = 50 * time.Millisecond
+	)
+
+	for i := range maxRetries {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return TransferResponse{}, ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
+
+		cached, err := s.idem.Get(ctx, s.db, key)
+		if err == nil {
+			s.log.Info("idempotency cache hit after race",
+				"layer", "svc",
+				"idempotencyKey", key,
+				"transferID", cached.TransferID,
+				"attempt", i+1,
+			)
+
+			var resp TransferResponse
+			if jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp); jsonErr != nil {
+				return TransferResponse{}, fmt.Errorf("svc: unmarshal cached response: %w", jsonErr)
+			}
+
+			resp.FromCache = true
+
+			return resp, nil
+		}
+	}
+
+	return TransferResponse{}, fmt.Errorf("svc: idempotency record not visible after race: key=%s", key)
 }
 
 // isUniqueViolation checks whether err is a PostgreSQL unique constraint
