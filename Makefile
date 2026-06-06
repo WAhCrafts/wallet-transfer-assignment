@@ -1,16 +1,16 @@
-.PHONY: all up down migrate build lint fmt test sonar
+.PHONY: up down migrate build build-dev lint fmt test test-unit test-coverage
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 COMPOSE       = docker compose
 LINTER        = golangci-lint
-SONAR_TOKEN   ?=
-SONAR_HOST    ?= http://localhost:9000
+# Runs a one-off command inside the dev container (source mounted at /app)
+DOCKER_RUN    = $(COMPOSE) run --rm --no-deps dev
 
 # ─── Lifecycle ────────────────────────────────────────────────────────────────
 
-## Start postgres + sonarqube containers
+## Start postgres
 up:
-	$(COMPOSE) up -d postgres sonarqube
+	$(COMPOSE) up -d postgres app
 	@echo "Waiting for postgres..."
 	@$(COMPOSE) exec postgres sh -c 'until pg_isready -U wallet -d wallet_db; do sleep 1; done'
 
@@ -25,66 +25,37 @@ migrate:
 		app ./wallet-service migrate || \
 	go run ./cmd/server migrate
 
-## Apply migrations locally (requires local postgres or DATABASE_URL)
-migrate-local:
-	DATABASE_URL=$${DATABASE_URL:-postgres://wallet:wallet@localhost:5432/wallet_db?sslmode=disable} \
-		go run ./cmd/server migrate
-
 # ─── Build ────────────────────────────────────────────────────────────────────
 
-## Build the Go binary
-build:
-	CGO_ENABLED=0 go build -o bin/wallet-service ./cmd/server
-
 ## Build inside Docker
-build-docker:
+build:
 	$(COMPOSE) build app
+
+build-dev:
+	$(COMPOSE) build dev
 
 # ─── Quality ──────────────────────────────────────────────────────────────────
 
-## Run golangci-lint
+## Run golangci-lint inside the dev container
 lint:
-	$(LINTER) run ./...
+	$(DOCKER_RUN) $(LINTER) run ./...
 
-## Format code with gofmt
+## Format code with gofmt inside the dev container
 fmt:
-	go fmt -x
+	$(DOCKER_RUN) gofmt -l -w .
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
-## Run all tests with race detector and coverage
+## Run all tests with race detector and coverage inside the dev container
 test:
-	go test -race -count=1 -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out | tail -1
+	$(DOCKER_RUN) go test -race -count=1 -coverprofile=coverage.out ./...
+	$(DOCKER_RUN) go tool cover -func=coverage.out | tail -1
 
 ## Run tests in short mode (no integration / testcontainers)
 test-unit:
-	go test -short -race -count=1 ./...
+	$(DOCKER_RUN) go test -short -race -count=1 ./...
 
 ## Run tests and produce HTML coverage report
 test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
-
-# ─── SonarQube ────────────────────────────────────────────────────────────────
-
-## Run sonar-scanner against local SonarQube CE
-sonar:
-	@if [ -z "$(SONAR_TOKEN)" ]; then \
-		echo "SONAR_TOKEN is not set. Running without auth (default admin:admin)..."; \
-		$(COMPOSE) run --rm sonar-scanner \
-			sonar-scanner \
-			-Dsonar.host.url=$(SONAR_HOST) \
-			-Dsonar.login=admin \
-			-Dsonar.password=admin; \
-	else \
-		$(COMPOSE) run --rm sonar-scanner \
-			sonar-scanner \
-			-Dsonar.host.url=$(SONAR_HOST) \
-			-Dsonar.token=$(SONAR_TOKEN); \
-	fi
-
-# ─── All-in-one ───────────────────────────────────────────────────────────────
-
-## Full quality pipeline: fmt → lint → test → build
-all: fmt lint test build
