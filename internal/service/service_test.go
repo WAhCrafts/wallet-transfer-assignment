@@ -28,8 +28,8 @@ type fakeTx struct {
 	rolledBack bool
 }
 
-func (f *fakeTx) Commit(_ context.Context) error   { f.committed = true; return nil }
-func (f *fakeTx) Rollback(_ context.Context) error { f.rolledBack = true; return nil }
+func (f *fakeTx) Commit(_ context.Context) error                         { f.committed = true; return nil }
+func (f *fakeTx) Rollback(_ context.Context) error                       { f.rolledBack = true; return nil }
 func (f *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row { return nil }
 func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
@@ -833,4 +833,3 @@ func TestTransferService_Magic_FromNatureWallet(t *testing.T) {
 		}
 	}
 }
-

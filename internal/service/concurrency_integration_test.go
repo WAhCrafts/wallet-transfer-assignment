@@ -124,7 +124,7 @@ func TestConcurrentDebitsFromSameWallet(t *testing.T) {
 	seedWallet(t, pool, to)
 
 	var (
-		mu       sync.Mutex
+		mu        sync.Mutex
 		successes int
 		failures  int
 	)

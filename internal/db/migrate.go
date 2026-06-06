@@ -7,8 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // postgres driver
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 // Migrate applies all pending up migrations from the provided fs.FS.

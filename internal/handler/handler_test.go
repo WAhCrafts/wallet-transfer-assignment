@@ -622,4 +622,3 @@ func TestHandler_MagicDeposit_400_BadJSON(t *testing.T) {
 		t.Fatalf("expected 400 for bad JSON, got %d", rec.Code)
 	}
 }
-
