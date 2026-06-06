@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,16 +21,22 @@ import (
 
 // fakeTransferSvc lets individual tests control what each method returns.
 type fakeTransferSvc struct {
-	executeResp  service.TransferResponse
-	executeErr   error
-	executeCount int
-	magicResp    service.TransferResponse
-	magicErr     error
-	magicCount   int
-	getTransfer  domain.Transfer
-	getTransErr  error
-	getWallet    domain.Wallet
-	getWalErr    error
+	createWallet    domain.Wallet
+	createWalletErr error
+	executeResp     service.TransferResponse
+	executeErr      error
+	executeCount    int
+	magicResp       service.TransferResponse
+	magicErr        error
+	magicCount      int
+	getTransfer     domain.Transfer
+	getTransErr     error
+	getWallet       domain.Wallet
+	getWalErr       error
+}
+
+func (f *fakeTransferSvc) CreateWallet(_ context.Context) (domain.Wallet, error) {
+	return f.createWallet, f.createWalletErr
 }
 
 func (f *fakeTransferSvc) Execute(_ context.Context, _ service.TransferRequest) (service.TransferResponse, error) {
@@ -80,6 +87,54 @@ func toJSON(t *testing.T, v any) []byte {
 	}
 
 	return b
+}
+
+// ── POST /wallets ─────────────────────────────────────────────────────────────
+
+func TestHandler_CreateWallet_201(t *testing.T) {
+	t.Parallel()
+
+	walletID := domain.NewID()
+	svc := &fakeTransferSvc{
+		createWallet: domain.Wallet{ID: walletID, Balance: 0},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/wallets", nil)
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body)
+	}
+
+	var resp handler.WalletResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.ID != walletID {
+		t.Fatalf("wallet ID mismatch: got %s, want %s", resp.ID, walletID)
+	}
+
+	if resp.Balance != 0 {
+		t.Fatalf("expected zero balance on creation, got %d", resp.Balance)
+	}
+}
+
+func TestHandler_CreateWallet_500_ServiceError(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{createWalletErr: errors.New("db: connection lost")}
+
+	req := httptest.NewRequest(http.MethodPost, "/wallets", nil)
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
 }
 
 // ── POST /transfers ───────────────────────────────────────────────────────────

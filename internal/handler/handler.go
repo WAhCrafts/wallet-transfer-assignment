@@ -29,6 +29,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 
+	r.Post("/wallets", h.createWallet)
 	r.Post("/transfers", h.createTransfer)
 	r.Get("/transfers/{id}", h.getTransfer)
 	r.Get("/wallets/{id}", h.getWallet)
@@ -36,6 +37,24 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
+
+// createWallet handles POST /wallets.
+// No request body is required. A new wallet with a zero balance and a freshly
+// generated UUID v7 is created and returned.
+func (h *Handler) createWallet(w http.ResponseWriter, r *http.Request) {
+	wallet, err := h.svc.CreateWallet(r.Context())
+	if err != nil {
+		slog.Error("create wallet failed", "layer", "handler", "error", err)
+		writeServiceError(w, r, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, WalletResponse{
+		ID:      wallet.ID,
+		Balance: wallet.Balance,
+	})
+}
 
 // createTransfer handles POST /transfers.
 func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
