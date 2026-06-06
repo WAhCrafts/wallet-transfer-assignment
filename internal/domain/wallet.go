@@ -6,6 +6,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// NatureWalletID is the static UUID of the system "nature" wallet that funds
+// magic deposits. It is created once by a database migration and always holds
+// at least 1 000 000 cents so that random deposits can always succeed.
+var NatureWalletID = uuid.MustParse("c0ffee00-0000-0000-0000-000000000001")
+
 // Wallet holds a user's monetary balance.
 type Wallet struct {
 	ID        uuid.UUID
