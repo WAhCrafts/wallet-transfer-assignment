@@ -50,5 +50,5 @@ test-unit:
 
 ## Run tests and produce HTML coverage report
 test-coverage:
-	go tool cover -html=coverage.out -o coverage.html
+	$(DOCKER_RUN) go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"

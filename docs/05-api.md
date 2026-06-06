@@ -70,7 +70,7 @@ previously used idempotency key.
 
 **Error body:**
 ```json
-{ "error": "human-readable message" }
+{ "requestId": "unique request-ID (optional)", "error": "human-readable message" }
 ```
 
 ---
