@@ -90,6 +90,12 @@ created_at    TIMESTAMP   NOT NULL DEFAULT NOW()
 
 ## Index Strategy
 
+System relies on using primary keys for table look-ups; the fastest look-up 
+strategy by-far.
+
+Since idempotency-key is used as external identifier, it has been indexed for
+use-cases described below:
+
 | Index | Reason |
 |---|---|
 | `idx_transfers_from_wallet` | Filter/join for transfer history per source wallet |

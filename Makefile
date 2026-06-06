@@ -1,10 +1,8 @@
 .PHONY: all up down migrate build lint fmt test sonar
 
 # ─── Variables ────────────────────────────────────────────────────────────────
-COMPOSE        = docker compose
-GO             = go
-GOLANGCI_LINT  = golangci-lint
-GOFUMPT        = gofumpt
+COMPOSE       = docker compose
+LINTER        = golangci-lint
 SONAR_TOKEN   ?=
 SONAR_HOST    ?= http://localhost:9000
 
@@ -25,18 +23,18 @@ migrate:
 	$(COMPOSE) run --rm \
 		-e DATABASE_URL=postgres://wallet:wallet@postgres:5432/wallet_db?sslmode=disable \
 		app ./wallet-service migrate || \
-	$(GO) run ./cmd/server migrate
+	go run ./cmd/server migrate
 
 ## Apply migrations locally (requires local postgres or DATABASE_URL)
 migrate-local:
 	DATABASE_URL=$${DATABASE_URL:-postgres://wallet:wallet@localhost:5432/wallet_db?sslmode=disable} \
-		$(GO) run ./cmd/server migrate
+		go run ./cmd/server migrate
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 
 ## Build the Go binary
 build:
-	CGO_ENABLED=0 $(GO) build -o bin/wallet-service ./cmd/server
+	CGO_ENABLED=0 go build -o bin/wallet-service ./cmd/server
 
 ## Build inside Docker
 build-docker:
@@ -46,36 +44,26 @@ build-docker:
 
 ## Run golangci-lint
 lint:
-	$(GOLANGCI_LINT) run ./...
+	$(LINTER) run ./...
 
-## Format code with gofumpt
+## Format code with gofmt
 fmt:
-	$(GOFUMPT) -w .
-
-## Check formatting without modifying files
-fmt-check:
-	@out=$$($(GOFUMPT) -l .); \
-	if [ -n "$$out" ]; then \
-		echo "These files need formatting:"; \
-		echo "$$out"; \
-		exit 1; \
-	fi
+	go fmt -x
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
 ## Run all tests with race detector and coverage
 test:
-	$(GO) test -race -count=1 -coverprofile=coverage.out ./...
-	$(GO) tool cover -func=coverage.out | tail -1
+	go test -race -count=1 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
 
 ## Run tests in short mode (no integration / testcontainers)
 test-unit:
-	$(GO) test -short -race -count=1 ./...
+	go test -short -race -count=1 ./...
 
 ## Run tests and produce HTML coverage report
 test-coverage:
-	$(GO) test -race -count=1 -coverprofile=coverage.out ./...
-	$(GO) tool cover -html=coverage.out -o coverage.html
+	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
 # ─── SonarQube ────────────────────────────────────────────────────────────────
