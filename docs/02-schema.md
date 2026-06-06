@@ -93,8 +93,7 @@ created_at    TIMESTAMP   NOT NULL DEFAULT NOW()
 System relies on using primary keys for table look-ups; the fastest look-up 
 strategy by-far.
 
-Since idempotency-key is used as external identifier, it has been indexed for
-use-cases described below:
+Other indexes for foreign-keys:
 
 | Index | Reason |
 |---|---|
