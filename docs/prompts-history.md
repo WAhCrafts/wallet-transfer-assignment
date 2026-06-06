@@ -50,3 +50,28 @@ All done. Here's a summary of what was fixed against the copilot-instructions re
 
 **Test count: domain 9 + handler 14 + service 14 = 37 unit tests, all passing** ✅
 >>>
+
+## Prompt for Magic endpoint
+
+You are golang code generator, help me create a new endpoint which deposits random amount between 100 and 10000 cents to a given wallet-id. 
+You will introduce a wallet with balance of a million cents. This wallet should be created by a migration script and it should have a static UUID. This UUID should be stored in Domain layer with constant named as NatureWalletID. 
+Next, create a HTTP endpoint "/magic" with request payload similar to that of "transfer" endpoint but without "fromWalletId" and "amount" fields. The response body should be the same (ie TransferResponse object).
+The handler layer does similar validation for idempotencyKey and toWalletId fields, and pass on to service layer.
+The service layer should execute transfer request by constructing TransferRequest object with incoming data plus using NatureWalletID as value for fromWalletId field and amount will be random value between 100 and 10000 cents.
+Write suitable tests, document details as done previously, also update README.md with API specs and sample curl request. Commit code changes with brief summary of actions taken separately for each layer. Make changes with inside-out approach.
+Plan and seek approval
+
+## Prompt for Create Wallet endpoint
+
+You are golang code generator, I need another API to create new wallet. 
+Similar to Get Wallet balance API, I need POST method to create a new wallet. There should not be any body for the request and response body will return wallet-ID.
+The service layer will generate Wallet-ID, use suitable repository to persist with default balance of 0 cents.
+As usual, write suitable tests, document details as done previously, also update README.md with API specs and sample curl request. 
+Make sure to re-order sample requests as follow: 
+1, Create Wallet API
+2, Magic API
+3, Wallet Balance API
+4, Initiate Transfer API
+5, Transfer status API
+Commit code changes with brief summary of actions taken separately for each layer. Make changes with inside-out approach.
+Plan and seek approval
