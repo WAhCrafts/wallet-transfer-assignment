@@ -54,36 +54,29 @@ make test
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `POST` | `/wallets` | Create a new wallet (zero balance) |
+| `POST` | `/magic` | Deposit a random amount (100–10 000 cents) from the nature wallet |
+| `GET` | `/wallets/{id}` | Fetch a wallet and its current balance |
 | `POST` | `/transfers` | Initiate a transfer (idempotent via `idempotencyKey`) |
 | `GET` | `/transfers/{id}` | Fetch a transfer by UUID |
-| `GET` | `/wallets/{id}` | Fetch a wallet and its current balance |
-| `POST` | `/magic` | Deposit a random amount (100–10 000 cents) from the nature wallet |
 
-### POST /transfers
+### POST /wallets
 
-```json
-{
-  "idempotencyKey": "unique-client-key",
-  "fromWalletId": "<uuid>",
-  "toWalletId": "<uuid>",
-  "amount": 10000
-}
-```
+No request body. Creates a new wallet with a zero balance and a freshly
+generated UUID v7.
 
-- `amount` is in minor units (cents). `10000` = $100.00.
-- Returns `201 Created` for new transfers, `200 OK` for idempotent replays.
-- Successful response looks like:
-   ```json
+- Returns `201 Created` with the new wallet ID and balance.
+- Successful response:
+  ```json
   {
     "id": "<uuid>",
-    "status": "PROCESSED",
-    "amount" 10000
+    "balance": 0
   }
   ```
 
 ### POST /magic
 
-Deposits a randomly chosen amount between **100 cents ($1.00)** and **10 000 cents ($100.00)** from the system *nature* wallet (ID `c0ffee00-0000-0000-0000-000000000001`) into the specified destination wallet.
+Deposits a randomly chosen amount between **100 cents ($1.00)** and **10 000 cents ($100.00)** from the system *nature* wallet into the specified destination wallet.
 
 ```json
 {
@@ -104,50 +97,102 @@ Deposits a randomly chosen amount between **100 cents ($1.00)** and **10 000 cen
   }
   ```
 
+### GET /wallets/{id}
+
+Returns the current balance of a wallet.
+
+- Returns `200 OK` with wallet ID and balance.
+- Successful response:
+  ```json
+  {
+    "id": "<uuid>",
+    "balance": 50000
+  }
+  ```
+
+### POST /transfers
+
+```json
+{
+  "idempotencyKey": "unique-client-key",
+  "fromWalletId": "<uuid>",
+  "toWalletId": "<uuid>",
+  "amount": 10000
+}
+```
+
+- `amount` is in minor units (cents). `10000` = $100.00.
+- Returns `201 Created` for new transfers, `200 OK` for idempotent replays.
+- Successful response:
+  ```json
+  {
+    "id": "<uuid>",
+    "status": "PROCESSED",
+    "amount": 10000
+  }
+  ```
+
+### GET /transfers/{id}
+
+Returns the current status of a transfer by UUID.
+
+- Returns `200 OK` with transfer ID, status, and amount.
+- Successful response:
+  ```json
+  {
+    "id": "<uuid>",
+    "status": "PROCESSED",
+    "amount": 10000
+  }
+  ```
+
 ### Sample Requests
 
 ```bash
-# 1) Create transfer (first call: 201 Created)
-curl -i -X POST http://localhost:8080/transfers \
+# 1) Create wallet (201 Created)
+curl -i -X POST http://localhost:8080/wallets
+
+# 2) Magic deposit — random amount from nature wallet (201 Created)
+curl -i -X POST http://localhost:8080/magic \
   -H "Content-Type: application/json" \
   -d '{
-    "idempotencyKey": "demo-key-001",
-    "fromWalletId": "11111111-1111-1111-1111-111111111111",
-    "toWalletId": "22222222-2222-2222-2222-222222222222",
-    "amount": 10000
+    "idempotencyKey": "magic-demo-001",
+    "toWalletId": "22222222-2222-2222-2222-222222222222"
   }'
 
-# 2) Replay same transfer request (same idempotencyKey: 200 OK)
-curl -i -X POST http://localhost:8080/transfers \
+# 2a) Replay magic deposit (same idempotencyKey: 200 OK, same amount)
+curl -i -X POST http://localhost:8080/magic \
   -H "Content-Type: application/json" \
   -d '{
-    "idempotencyKey": "demo-key-001",
-    "fromWalletId": "11111111-1111-1111-1111-111111111111",
-    "toWalletId": "22222222-2222-2222-2222-222222222222",
-    "amount": 10000
+    "idempotencyKey": "magic-demo-001",
+    "toWalletId": "22222222-2222-2222-2222-222222222222"
   }'
 
-# 3) Get transfer by ID
-curl -i http://localhost:8080/transfers/<transfer-uuid>
-
-# 4) Get wallet by ID
+# 3) Get wallet balance
 curl -i http://localhost:8080/wallets/<wallet-uuid>
 
-# 5) Magic deposit — random amount from nature wallet (201 Created)
-curl -i -X POST http://localhost:8080/magic \
+# 4) Initiate transfer (first call: 201 Created)
+curl -i -X POST http://localhost:8080/transfers \
   -H "Content-Type: application/json" \
   -d '{
-    "idempotencyKey": "magic-demo-001",
-    "toWalletId": "22222222-2222-2222-2222-222222222222"
+    "idempotencyKey": "demo-key-001",
+    "fromWalletId": "11111111-1111-1111-1111-111111111111",
+    "toWalletId": "22222222-2222-2222-2222-222222222222",
+    "amount": 10000
   }'
 
-# 6) Replay magic deposit (same idempotencyKey: 200 OK, same amount)
-curl -i -X POST http://localhost:8080/magic \
+# 4a) Replay same transfer (same idempotencyKey: 200 OK)
+curl -i -X POST http://localhost:8080/transfers \
   -H "Content-Type: application/json" \
   -d '{
-    "idempotencyKey": "magic-demo-001",
-    "toWalletId": "22222222-2222-2222-2222-222222222222"
+    "idempotencyKey": "demo-key-001",
+    "fromWalletId": "11111111-1111-1111-1111-111111111111",
+    "toWalletId": "22222222-2222-2222-2222-222222222222",
+    "amount": 10000
   }'
+
+# 5) Transfer status
+curl -i http://localhost:8080/transfers/<transfer-uuid>
 ```
 
 ## Architecture

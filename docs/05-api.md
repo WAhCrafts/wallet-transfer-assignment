@@ -8,6 +8,29 @@ HTTP status codes. No business logic lives in the handler.
 
 ## Endpoints
 
+### `POST /wallets`
+
+Creates a new wallet with a zero balance and a freshly generated UUID v7.
+
+**Request:** No body required.
+
+**Responses:**
+
+| Status | Condition |
+|---|---|
+| `201 Created` | Wallet created successfully. |
+| `500 Internal Server Error` | Unexpected infrastructure failure. |
+
+**Success body (201):**
+```json
+{
+  "id":      "uuid-v7",
+  "balance": 0
+}
+```
+
+---
+
 ### `POST /transfers`
 
 Creates a new wallet-to-wallet transfer or returns the cached result for a
@@ -91,7 +114,43 @@ Returns the current balance of a wallet.
 }
 ```
 
-## Idempotency Signalling
+---
+
+### `POST /magic`
+
+Deposits a randomly chosen amount between 100 cents and 10 000 cents from the
+system *nature* wallet (`c0ffee00-0000-0000-0000-000000000001`) into the
+specified destination wallet. The endpoint is idempotent: the same amount is
+always returned for a given `idempotencyKey`.
+
+**Request:**
+```json
+{
+  "idempotencyKey": "abc123",
+  "toWalletId":     "uuid-v7"
+}
+```
+
+**Responses:**
+
+| Status | Condition |
+|---|---|
+| `201 Created` | Deposit executed successfully (first time). |
+| `200 OK` | Idempotent replay — same key, same result returned from cache. |
+| `400 Bad Request` | Missing or overlong `idempotencyKey`, missing `toWalletId`, or malformed JSON. |
+| `404 Not Found` | `toWalletId` does not exist. |
+| `500 Internal Server Error` | Unexpected infrastructure failure. |
+
+**Success body (201 / 200):**
+```json
+{
+  "id":     "uuid-v7",
+  "status": "PROCESSED",
+  "amount": 4231
+}
+```
+
+
 
 The service sets `TransferResponse.FromCache = true` when the response was
 served from the idempotency cache. The handler maps this to HTTP 200; fresh
