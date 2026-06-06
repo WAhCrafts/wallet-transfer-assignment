@@ -32,13 +32,6 @@ const (
 	MaxIdempotencyKeyLength = 255
 )
 
-// DB is the subset of pgxpool.Pool the service needs.
-type DB interface {
-	Begin(ctx context.Context) (pgx.Tx, error)
-	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
-	repository.Querier
-}
-
 // TransferRequest holds the input for a transfer operation.
 type TransferRequest struct {
 	IdempotencyKey string
@@ -121,13 +114,20 @@ func (s *TransferService) Execute(ctx context.Context, req TransferRequest) (Tra
 		)
 
 		var resp TransferResponse
-		if jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp); jsonErr != nil {
-			return TransferResponse{}, fmt.Errorf("svc: unmarshal cached response: %w", jsonErr)
+		jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp)
+		if jsonErr == nil {
+			resp.FromCache = true
+
+			return resp, nil
 		}
 
-		resp.FromCache = true
-
-		return resp, nil
+		// If unmarshaling fails, log the error and continue to attempt processing the transfer as normal.
+		// The cache record will be overwritten on success, so this is a self-healing scenario.
+		s.log.Error("failed to unmarshal idempotency cache record",
+			"layer", "svc",
+			"idempotencyKey", req.IdempotencyKey,
+			"error", jsonErr,
+		)
 	}
 
 	// ── 2. Transactional transfer ───────────────────────────────────────────

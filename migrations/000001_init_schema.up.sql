@@ -13,13 +13,13 @@ CREATE TABLE wallets (
     balance    BIGINT      NOT NULL    DEFAULT 0
                            CHECK (balance >= 0),
     version    BIGINT      NOT NULL    DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL    DEFAULT NOW()
+    created_at TIMESTAMP   NOT NULL    DEFAULT NOW(),
+    updated_at TIMESTAMP   NOT NULL    DEFAULT NOW()
 );
 
 -- ── transfers ─────────────────────────────────────────────────────────────────
 -- Records a transfer request and its lifecycle.
--- idempotency_key carries a UNIQUE constraint so that two concurrent first-time
+-- idempotency_key carries a UNIQUE constraint so that any concurrent
 -- requests with the same key race to insert; only one wins.
 -- status is stored as a SMALLINT matching TransferStatus domain constants:
 --   1 = PENDING, 2 = PROCESSED, 3 = FAILED
@@ -32,15 +32,11 @@ CREATE TABLE transfers (
     amount           BIGINT      NOT NULL CHECK (amount > 0),
     status           SMALLINT    NOT NULL DEFAULT 1
                                  CHECK (status IN (1, 2, 3)),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at       TIMESTAMP   NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP   NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_transfers_idempotency_key UNIQUE (idempotency_key),
     CONSTRAINT chk_different_wallets CHECK (from_wallet_id <> to_wallet_id)
 );
-
-CREATE INDEX idx_transfers_from_wallet ON transfers (from_wallet_id);
-CREATE INDEX idx_transfers_to_wallet   ON transfers (to_wallet_id);
-CREATE INDEX idx_transfers_status      ON transfers (status);
 
 -- ── ledger_entries ────────────────────────────────────────────────────────────
 -- Double-entry bookkeeping: every transfer produces exactly two rows.
@@ -54,7 +50,7 @@ CREATE TABLE ledger_entries (
     wallet_id   UUID        NOT NULL REFERENCES wallets(id),
     type        SMALLINT    NOT NULL CHECK (type IN (1, 2)),
     amount      BIGINT      NOT NULL CHECK (amount > 0),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMP   NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_ledger_transfer ON ledger_entries (transfer_id);
@@ -70,7 +66,7 @@ CREATE TABLE idempotency_records (
     transfer_id   UUID        NOT NULL,
     response_json TEXT        NOT NULL,
     status_code   SMALLINT    NOT NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at    TIMESTAMP   NOT NULL DEFAULT NOW()
 );
 
 COMMIT;

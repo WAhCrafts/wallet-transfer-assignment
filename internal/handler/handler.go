@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -14,15 +13,6 @@ import (
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
 	"github.com/Robustrade/wallet-transfer-assignment/internal/service"
 )
-
-// TransferSvc is the service interface the handler depends on.
-// Keeping it here (not in the service package) avoids an import cycle and
-// allows the handler to be tested with any conforming test double.
-type TransferSvc interface {
-	Execute(ctx context.Context, req service.TransferRequest) (service.TransferResponse, error)
-	GetTransfer(ctx context.Context, id uuid.UUID) (domain.Transfer, error)
-	GetWallet(ctx context.Context, id uuid.UUID) (domain.Wallet, error)
-}
 
 // Handler holds HTTP handler methods and their dependencies.
 type Handler struct {
@@ -42,42 +32,6 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/transfers", h.createTransfer)
 	r.Get("/transfers/{id}", h.getTransfer)
 	r.Get("/wallets/{id}", h.getWallet)
-}
-
-// ── Request / Response types ──────────────────────────────────────────────────
-
-// CreateTransferRequest is the JSON body for POST /transfers.
-type CreateTransferRequest struct {
-	IdempotencyKey string        `json:"idempotencyKey"`
-	FromWalletID   uuid.UUID     `json:"fromWalletId"`
-	ToWalletID     uuid.UUID     `json:"toWalletId"`
-	Amount         domain.Amount `json:"amount"`
-}
-
-// CreateTransferResponse is the JSON body returned on 201 / 200.
-type CreateTransferResponse struct {
-	ID     uuid.UUID              `json:"id"`
-	Status domain.TransferStatus  `json:"status"`
-	Amount domain.Amount          `json:"amount"`
-}
-
-// WalletResponse is the JSON body returned by GET /wallets/{id}.
-type WalletResponse struct {
-	ID      uuid.UUID     `json:"id"`
-	Balance domain.Amount `json:"balance"`
-}
-
-// TransferResponse is the JSON body returned by GET /transfers/{id}.
-type TransferResponse struct {
-	ID     uuid.UUID              `json:"id"`
-	Status domain.TransferStatus  `json:"status"`
-	Amount domain.Amount          `json:"amount"`
-}
-
-// errorResponse is the JSON body for all error responses.
-type errorResponse struct {
-	RequestID string `json:"requestId,omitempty"`
-	Error     string `json:"error"`
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -207,10 +161,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeError writes a JSON error response including the chi request ID for traceability.
+// writeError writes log entry and builds JSON error response including the request ID for traceability.
 func writeError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	requestID := middleware.GetReqID(r.Context())
+	slog.Error("request failed", "layer", "handler", "error", msg, "requestID", requestID)
+
 	writeJSON(w, status, errorResponse{
-		RequestID: middleware.GetReqID(r.Context()),
+		RequestID: requestID,
 		Error:     msg,
 	})
 }

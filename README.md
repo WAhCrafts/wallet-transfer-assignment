@@ -1,51 +1,13 @@
 # Wallet Transfer Assignment Repository
 
-This repository is a reusable coding assignment template for evaluating backend engineers on wallet transfers, idempotency, concurrency control, and double-entry ledger design.
+> Branch: `solution/waseem`
 
-## Included
-
-- `ASSIGNMENT.md` - candidate-facing prompt
-- `.github/pull_request_template.md` - required PR structure
-- `.github/workflows/ci.yml` - lint, format, test placeholder workflow
-- `.github/workflows/sonarqube.yml` - SonarQube pull request analysis
-- `.github/copilot-instructions.md` - repository-level Copilot review guidance
-- `evaluation_guide.md` - reviewer rubric
-- `branch-protection-checklist.md` - GitHub setup checklist
-
-## Intended use
-
-1. Mark this repository as a GitHub template repository.
-2. Create one private repository per candidate from the template.
-3. Add the candidate as a collaborator.
-4. Ask them to submit via a pull request into `main`.
-5. Enable required checks, SonarQube, and Copilot review in GitHub.
-
-## Notes
-
-- Copilot automatic pull request review is configured in GitHub repository or organization settings, not purely through files in the repo.
-- The `copilot-instructions.md` file included here provides repository-specific review guidance once Copilot review is enabled.
-- The CI workflow is language-agnostic by default and expects you to set the `LINT_CMD`, `FORMAT_CHECK_CMD`, and `TEST_CMD` repository variables or replace the commands directly.
-
-## How to Submit Assignment
-
-1. **Fork this repository** to your own GitHub account.
-2. Complete the assignment described in [`ASSIGNMENT.md`](./ASSIGNMENT.md).
-3. **Raise a Pull Request** back to this repository (`main` branch) with your full solution.
-
-Your PR branch should be named: `solution/<your-name>` (e.g., `solution/jane-doe`).
-
----
-
-## Solution — Wallet Transfer Service (Go)
-
-> Branch: `waseem`
-
-### Prerequisites
+## Prerequisites
 
 - Go 1.24+
 - Docker Desktop (for PostgreSQL and SonarQube)
 
-### Quick start
+## Quick start
 
 ```bash
 # Start PostgreSQL + SonarQube
@@ -61,7 +23,7 @@ make build
 ./wallet-transfer-server
 ```
 
-### Development commands
+## Development commands
 
 | Command | Description |
 |---------|-------------|
@@ -75,7 +37,7 @@ make build
 | `make sonar` | Upload coverage report to SonarQube |
 | `make all` | fmt → lint → test → build |
 
-### Running tests
+## Running tests
 
 ```bash
 # Unit tests only (domain, service, handler — no Docker)
@@ -88,7 +50,7 @@ go test ./internal/repository/... ./internal/service/... -count=1 -run Integrati
 make test
 ```
 
-### API
+## API
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -96,7 +58,7 @@ make test
 | `GET` | `/transfers/{id}` | Fetch a transfer by UUID |
 | `GET` | `/wallets/{id}` | Fetch a wallet and its current balance |
 
-#### POST /transfers
+### POST /transfers
 
 ```json
 {
@@ -109,8 +71,46 @@ make test
 
 - `amount` is in minor units (cents). `10000` = $100.00.
 - Returns `201 Created` for new transfers, `200 OK` for idempotent replays.
+- Successful response looks like:
+   ```json
+  {
+    "id": "<uuid>",
+    "status": "PROCESSED",
+    "amount" 10000
+  }
+  ```
 
-### Architecture
+### Sample Requests
+
+```bash
+# 1) Create transfer (first call: 201 Created)
+curl -i -X POST http://localhost:8080/transfers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idempotencyKey": "demo-key-001",
+    "fromWalletId": "11111111-1111-1111-1111-111111111111",
+    "toWalletId": "22222222-2222-2222-2222-222222222222",
+    "amount": 10000
+  }'
+
+# 2) Replay same transfer request (same idempotencyKey: 200 OK)
+curl -i -X POST http://localhost:8080/transfers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idempotencyKey": "demo-key-001",
+    "fromWalletId": "11111111-1111-1111-1111-111111111111",
+    "toWalletId": "22222222-2222-2222-2222-222222222222",
+    "amount": 10000
+  }'
+
+# 3) Get transfer by ID
+curl -i http://localhost:8080/transfers/<transfer-uuid>
+
+# 4) Get wallet by ID
+curl -i http://localhost:8080/wallets/<wallet-uuid>
+```
+
+## Architecture
 
 ```
 cmd/server/          — entrypoint, wiring, graceful shutdown
@@ -123,5 +123,5 @@ migrations/          — SQL migrations (golang-migrate, embedded)
 docs/                — design notes per layer
 ```
 
-See `docs/` for per-layer design rationale.
-
+See `docs/` for per-layer design rationale, prompts history and 
+future improvements plan.

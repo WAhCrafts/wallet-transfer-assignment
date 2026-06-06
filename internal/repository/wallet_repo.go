@@ -39,7 +39,8 @@ func (r *walletRepo) Create(ctx context.Context, q Querier, w domain.Wallet) err
 func (r *walletRepo) GetByID(ctx context.Context, q Querier, id uuid.UUID) (domain.Wallet, error) {
 	const query = `
 		SELECT id, balance, version, created_at, updated_at
-		FROM wallets WHERE id = $1`
+		FROM wallets
+		WHERE id = $1`
 
 	return r.scanWallet(q.QueryRow(ctx, query, id))
 }
@@ -47,7 +48,9 @@ func (r *walletRepo) GetByID(ctx context.Context, q Querier, id uuid.UUID) (doma
 func (r *walletRepo) GetByIDForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (domain.Wallet, error) {
 	const query = `
 		SELECT id, balance, version, created_at, updated_at
-		FROM wallets WHERE id = $1 FOR UPDATE`
+		FROM wallets
+		WHERE id = $1
+		FOR UPDATE`
 
 	return r.scanWallet(tx.QueryRow(ctx, query, id))
 }

@@ -16,10 +16,11 @@ Stores wallet identity and running balance.
 id         UUID        PRIMARY KEY
 balance    NUMERIC(20,4) NOT NULL DEFAULT 0  CHECK (balance >= 0)
 version    BIGINT      NOT NULL DEFAULT 0
-created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+created_at TIMESTAMP   NOT NULL DEFAULT NOW()
+updated_at TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
+- Primary key is indexed, hence, ID based lookups are the fastest lookups
 - `balance >= 0` constraint prevents overdraft at the DB level even if application
   logic has a bug.
 - `version` is incremented on every balance update; used as an optimistic-lock
@@ -38,8 +39,8 @@ from_wallet_id  UUID        NOT NULL  REFERENCES wallets(id)
 to_wallet_id    UUID        NOT NULL  REFERENCES wallets(id)
 amount          NUMERIC(20,4) NOT NULL CHECK (amount > 0)
 status          SMALLINT    NOT NULL DEFAULT 1  CHECK (status IN (1,2,3))
-created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+created_at      TIMESTAMP   NOT NULL DEFAULT NOW()
+updated_at      TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
 Constraints:
@@ -48,13 +49,6 @@ Constraints:
 - `CHECK (amount > 0)` — non-positive amounts are rejected.
 - `status IN (1,2,3)` — only valid domain states persist (1=PENDING, 2=PROCESSED,
   3=FAILED).
-
-Indexes:
-```sql
-idx_transfers_from_wallet ON transfers(from_wallet_id)
-idx_transfers_to_wallet   ON transfers(to_wallet_id)
-idx_transfers_status      ON transfers(status)
-```
 
 ### `ledger_entries`
 
@@ -66,7 +60,7 @@ transfer_id UUID        NOT NULL  REFERENCES transfers(id)
 wallet_id   UUID        NOT NULL  REFERENCES wallets(id)
 type        SMALLINT    NOT NULL  CHECK (type IN (1,2))
 amount      NUMERIC(20,4) NOT NULL CHECK (amount > 0)
-created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+created_at  TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
 - `type IN (1,2)` — only DEBIT (1) or CREDIT (2) are valid.
@@ -87,7 +81,7 @@ key           TEXT     PRIMARY KEY
 transfer_id   UUID     NOT NULL
 response_json TEXT     NOT NULL
 status_code   SMALLINT NOT NULL
-created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+created_at    TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
 - Written atomically within the same transaction as the transfer.
