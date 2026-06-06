@@ -60,11 +60,16 @@ func (db *fakeDB) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag
 // fakeWalletRepo lets individual tests control what each method returns.
 type fakeWalletRepo struct {
 	wallets      map[uuid.UUID]domain.Wallet
+	createErr    error
 	updateErr    error
 	getForUpdate func(id uuid.UUID) (domain.Wallet, error)
 }
 
 func (r *fakeWalletRepo) Create(_ context.Context, _ repository.Querier, w domain.Wallet) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+
 	if r.wallets == nil {
 		r.wallets = make(map[uuid.UUID]domain.Wallet)
 	}
@@ -203,6 +208,54 @@ func newServiceWithFakes() (
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+// ── CreateWallet ──────────────────────────────────────────────────────────────
+
+func TestTransferService_CreateWallet_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	w, err := svc.CreateWallet(ctx)
+	if err != nil {
+		t.Fatalf("CreateWallet: %v", err)
+	}
+
+	// ID must be non-zero.
+	if w.ID == (uuid.UUID{}) {
+		t.Fatal("created wallet must have a non-zero ID")
+	}
+
+	// Balance must be zero on creation.
+	if w.Balance != 0 {
+		t.Fatalf("expected zero balance, got %d", w.Balance)
+	}
+
+	// Wallet must be persisted in the repo.
+	stored, err := wallets.GetByID(ctx, nil, w.ID)
+	if err != nil {
+		t.Fatalf("wallet not found in repo after create: %v", err)
+	}
+
+	if stored.ID != w.ID {
+		t.Fatalf("stored wallet ID mismatch: got %s, want %s", stored.ID, w.ID)
+	}
+}
+
+func TestTransferService_CreateWallet_RepoError(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	wallets.createErr = errors.New("db: disk full")
+
+	_, err := svc.CreateWallet(ctx)
+	if err == nil {
+		t.Fatal("expected error when repo Create fails, got nil")
+	}
+}
 
 func TestTransferService_Execute_HappyPath(t *testing.T) {
 	t.Parallel()

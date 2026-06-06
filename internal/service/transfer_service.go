@@ -311,6 +311,20 @@ func (s *TransferService) GetWallet(ctx context.Context, id uuid.UUID) (domain.W
 	return w, nil
 }
 
+// CreateWallet creates a new wallet with a zero balance and a freshly generated
+// UUID v7, persists it, and returns the created wallet.
+func (s *TransferService) CreateWallet(ctx context.Context) (domain.Wallet, error) {
+	w := domain.NewWallet()
+
+	if err := s.wallets.Create(ctx, s.db, w); err != nil {
+		return domain.Wallet{}, fmt.Errorf("svc: create wallet: %w", err)
+	}
+
+	s.log.Info("wallet created", "layer", "svc", "walletID", w.ID)
+
+	return w, nil
+}
+
 // Magic executes a deposit from the nature wallet to the given destination
 // wallet for a randomly chosen amount in the range [100, 10 000] cents.
 //
