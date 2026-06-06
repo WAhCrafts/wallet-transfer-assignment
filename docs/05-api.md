@@ -62,11 +62,11 @@ previously used idempotency key.
 ```json
 {
   "id":     "uuid-v7",
-  "status": 2,
+  "status": "PROCESSED",
   "amount": 10000
 }
 ```
-`status` values: `1` = PENDING, `2` = PROCESSED, `3` = FAILED.
+`status` values: `PENDING`, `PROCESSED`, or `FAILED`.
 
 **Error body:**
 ```json
@@ -89,7 +89,7 @@ Returns the current state of a transfer.
 ```json
 {
   "id":     "uuid-v7",
-  "status": 2,
+  "status": "PROCESSED",
   "amount": 10000
 }
 ```

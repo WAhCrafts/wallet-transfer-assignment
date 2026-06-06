@@ -4,50 +4,51 @@
 
 ## Prerequisites
 
-- Go 1.24+
-- Docker Desktop (for PostgreSQL and SonarQube)
+- Go 1.25+
+- Docker Desktop
 
 ## Quick start
 
 ```bash
-# Start PostgreSQL + SonarQube
+# Start PostgreSQL + App
 make up
-
-# Run database migrations
-make migrate
-
-# Build the binary
-make build
-
-# Start the server (runs migrations automatically)
-./wallet-transfer-server
 ```
 
 ## Development commands
 
 | Command | Description |
 |---------|-------------|
-| `make up` | Start PostgreSQL + SonarQube via Docker Compose |
+| `make up` | Start PostgreSQL + App containers via Docker Compose |
 | `make down` | Stop and remove containers |
-| `make migrate` | Run database migrations (requires running Postgres) |
 | `make build` | Compile the server binary |
-| `make fmt` | Run `gofmt` and `goimports` |
-| `make lint` | Run `golangci-lint` |
-| `make test` | Run all unit tests (no Docker needed) |
-| `make sonar` | Upload coverage report to SonarQube |
-| `make all` | fmt → lint → test → build |
+| `make build-dev` | Compile the application binary for tests |
+| `make fmt` | Run `gofmt` (NOTE: File-system dependent) |
+| `make lint` | Run `golangci-lint` in "dev" container |
+| `make test` | Run all tests (unit + functional) |
+| `make test-coverage` | Convert raw code coverage output to HTML for readability |
+| `make test-unit` | Run only unit tests (w/o test-containers) |
 
 ## Running tests
 
+### Quick
+
 ```bash
+# All tests with race detector and coverage (inside Docker dev container)
+make test
+```
+
+### Manual
+
+From inside `dev` container
+
+```bash
+docker compose run --rm --no-deps dev
+
 # Unit tests only (domain, service, handler — no Docker)
 go test ./internal/domain/... ./internal/handler/... ./internal/service/... -count=1
 
 # Integration tests (requires Docker)
 go test ./internal/repository/... ./internal/service/... -count=1 -run Integration
-
-# All tests including concurrency
-make test
 ```
 
 ## API

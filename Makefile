@@ -1,4 +1,4 @@
-.PHONY: up down migrate build build-dev lint fmt test test-unit test-coverage
+.PHONY: up down build build-dev lint fmt test test-unit test-coverage
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 COMPOSE       = docker compose
@@ -17,13 +17,6 @@ up:
 ## Stop and remove all containers
 down:
 	$(COMPOSE) down -v
-
-## Apply database migrations (requires postgres running)
-migrate:
-	$(COMPOSE) run --rm \
-		-e DATABASE_URL=postgres://wallet:wallet@postgres:5432/wallet_db?sslmode=disable \
-		app ./wallet-service migrate || \
-	go run ./cmd/server migrate
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 

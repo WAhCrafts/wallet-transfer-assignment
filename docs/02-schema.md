@@ -14,19 +14,18 @@ Stores wallet identity and running balance.
 
 ```sql
 id         UUID        PRIMARY KEY
-balance    NUMERIC(20,4) NOT NULL DEFAULT 0  CHECK (balance >= 0)
+balance    BIGINT      NOT NULL DEFAULT 0  CHECK (balance >= 0)
 version    BIGINT      NOT NULL DEFAULT 0
 created_at TIMESTAMP   NOT NULL DEFAULT NOW()
 updated_at TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
 - Primary key is indexed, hence, ID based lookups are the fastest lookups
+- `balance BIGINT` for amount in cents
 - `balance >= 0` constraint prevents overdraft at the DB level even if application
   logic has a bug.
 - `version` is incremented on every balance update; used as an optimistic-lock
   guard for future read-heavy paths.
-- `NUMERIC(20,4)` stores up to 16 digits before the decimal with 4 decimal places
-  — sufficient for financial amounts without floating-point rounding.
 
 ### `transfers`
 
@@ -37,7 +36,7 @@ id              UUID        PRIMARY KEY
 idempotency_key TEXT        NOT NULL  UNIQUE
 from_wallet_id  UUID        NOT NULL  REFERENCES wallets(id)
 to_wallet_id    UUID        NOT NULL  REFERENCES wallets(id)
-amount          NUMERIC(20,4) NOT NULL CHECK (amount > 0)
+amount          BIGINT      NOT NULL CHECK (amount > 0)
 status          SMALLINT    NOT NULL DEFAULT 1  CHECK (status IN (1,2,3))
 created_at      TIMESTAMP   NOT NULL DEFAULT NOW()
 updated_at      TIMESTAMP   NOT NULL DEFAULT NOW()
@@ -59,7 +58,7 @@ id          UUID        PRIMARY KEY
 transfer_id UUID        NOT NULL  REFERENCES transfers(id)
 wallet_id   UUID        NOT NULL  REFERENCES wallets(id)
 type        SMALLINT    NOT NULL  CHECK (type IN (1,2))
-amount      NUMERIC(20,4) NOT NULL CHECK (amount > 0)
+amount      BIGINT      NOT NULL CHECK (amount > 0)
 created_at  TIMESTAMP   NOT NULL DEFAULT NOW()
 ```
 
