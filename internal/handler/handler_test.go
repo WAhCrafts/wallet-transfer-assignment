@@ -23,6 +23,9 @@ type fakeTransferSvc struct {
 	executeResp  service.TransferResponse
 	executeErr   error
 	executeCount int
+	magicResp    service.TransferResponse
+	magicErr     error
+	magicCount   int
 	getTransfer  domain.Transfer
 	getTransErr  error
 	getWallet    domain.Wallet
@@ -38,6 +41,16 @@ func (f *fakeTransferSvc) Execute(_ context.Context, _ service.TransferRequest) 
 	}
 
 	return resp, f.executeErr
+}
+
+func (f *fakeTransferSvc) Magic(_ context.Context, _ service.MagicRequest) (service.TransferResponse, error) {
+	f.magicCount++
+	resp := f.magicResp
+	if f.magicCount > 1 {
+		resp.FromCache = true
+	}
+
+	return resp, f.magicErr
 }
 
 func (f *fakeTransferSvc) GetTransfer(_ context.Context, _ uuid.UUID) (domain.Transfer, error) {
@@ -373,3 +386,185 @@ func TestHandler_CreateTransfer_409_DuplicateIdempotencyKey(t *testing.T) {
 		t.Fatalf("expected 409 for duplicate idempotency key, got %d", rec.Code)
 	}
 }
+
+// ── POST /magic ───────────────────────────────────────────────────────────────
+
+func TestHandler_MagicDeposit_201(t *testing.T) {
+	t.Parallel()
+
+	transferID := domain.NewID()
+	svc := &fakeTransferSvc{
+		magicResp: service.TransferResponse{
+			TransferID: transferID,
+			Status:     domain.TransferStatusProcessed,
+			Amount:     5_000,
+		},
+	}
+
+	body := handler.MagicDepositRequest{
+		IdempotencyKey: "magic-key-001",
+		ToWalletID:     domain.NewID(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body)
+	}
+
+	var resp handler.TransferResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.ID != transferID {
+		t.Fatalf("transfer ID mismatch: got %s, want %s", resp.ID, transferID)
+	}
+
+	if resp.Amount < 100 || resp.Amount > 10_000 {
+		t.Fatalf("amount %d outside expected range [100, 10000]", resp.Amount)
+	}
+}
+
+func TestHandler_MagicDeposit_200_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{
+		magicResp: service.TransferResponse{
+			TransferID: domain.NewID(),
+			Status:     domain.TransferStatusProcessed,
+			Amount:     1_000,
+		},
+	}
+	router := newRouter(svc)
+
+	body := handler.MagicDepositRequest{
+		IdempotencyKey: "magic-idem-001",
+		ToWalletID:     domain.NewID(),
+	}
+
+	req1 := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("first call: expected 201, got %d", rec1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second call: expected 200, got %d", rec2.Code)
+	}
+}
+
+func TestHandler_MagicDeposit_400_MissingIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{}
+	body := handler.MagicDepositRequest{
+		ToWalletID: domain.NewID(),
+		// IdempotencyKey intentionally omitted
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandler_MagicDeposit_400_IdempotencyKeyTooLong(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{}
+
+	key := make([]byte, service.MaxIdempotencyKeyLength+1)
+	for i := range key {
+		key[i] = 'a'
+	}
+
+	body := handler.MagicDepositRequest{
+		IdempotencyKey: string(key),
+		ToWalletID:     domain.NewID(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for overlong idempotency key, got %d", rec.Code)
+	}
+}
+
+func TestHandler_MagicDeposit_400_MissingToWalletID(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{}
+	body := handler.MagicDepositRequest{
+		IdempotencyKey: "magic-key-001",
+		// ToWalletID intentionally zero-value
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing toWalletId, got %d", rec.Code)
+	}
+}
+
+func TestHandler_MagicDeposit_404_WalletNotFound(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{magicErr: domain.ErrWalletNotFound}
+	body := handler.MagicDepositRequest{
+		IdempotencyKey: "magic-key-001",
+		ToWalletID:     domain.NewID(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader(toJSON(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandler_MagicDeposit_400_BadJSON(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeTransferSvc{}
+
+	req := httptest.NewRequest(http.MethodPost, "/magic", bytes.NewReader([]byte(`{bad json}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	newRouter(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad JSON, got %d", rec.Code)
+	}
+}
+

@@ -32,6 +32,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/transfers", h.createTransfer)
 	r.Get("/transfers/{id}", h.getTransfer)
 	r.Get("/wallets/{id}", h.getWallet)
+	r.Post("/magic", h.magicDeposit)
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -130,6 +131,61 @@ func (h *Handler) getWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, WalletResponse{
 		ID:      wallet.ID,
 		Balance: wallet.Balance,
+	})
+}
+
+// magicDeposit handles POST /magic.
+// It deposits a random amount between 100 and 10 000 cents from the nature
+// wallet into the specified destination wallet. The response is identical to
+// that of POST /transfers, and the endpoint is idempotent via idempotencyKey.
+func (h *Handler) magicDeposit(w http.ResponseWriter, r *http.Request) {
+	var body MagicDepositRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid JSON body")
+
+		return
+	}
+
+	if body.IdempotencyKey == "" {
+		writeError(w, r, http.StatusBadRequest, "idempotencyKey is required")
+
+		return
+	}
+
+	if len(body.IdempotencyKey) > service.MaxIdempotencyKeyLength {
+		writeError(w, r, http.StatusBadRequest, "idempotencyKey exceeds maximum length")
+
+		return
+	}
+
+	if body.ToWalletID == (uuid.UUID{}) {
+		writeError(w, r, http.StatusBadRequest, "toWalletId is required")
+
+		return
+	}
+
+	resp, err := h.svc.Magic(r.Context(), service.MagicRequest{
+		IdempotencyKey: body.IdempotencyKey,
+		ToWalletID:     body.ToWalletID,
+	})
+	if err != nil {
+		slog.Error("magic deposit failed", "layer", "handler", "error", err,
+			"idempotencyKey", body.IdempotencyKey)
+		writeServiceError(w, r, err)
+
+		return
+	}
+
+	// Return 200 for idempotent replays, 201 for freshly executed deposits.
+	statusCode := http.StatusCreated
+	if resp.FromCache {
+		statusCode = http.StatusOK
+	}
+
+	writeJSON(w, statusCode, TransferResponse{
+		ID:     resp.TransferID,
+		Status: resp.Status,
+		Amount: resp.Amount,
 	})
 }
 

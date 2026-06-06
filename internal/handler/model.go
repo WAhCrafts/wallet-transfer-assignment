@@ -21,6 +21,14 @@ type CreateTransferRequest struct {
 	Amount         domain.Amount `json:"amount"`
 }
 
+// MagicDepositRequest is the JSON body for POST /magic.
+// Unlike CreateTransferRequest it omits fromWalletId and amount; the service
+// layer fills those in automatically (nature wallet + random amount).
+type MagicDepositRequest struct {
+	IdempotencyKey string    `json:"idempotencyKey"`
+	ToWalletID     uuid.UUID `json:"toWalletId"`
+}
+
 // CreateTransferResponse is the JSON body returned on 201 / 200.
 type CreateTransferResponse struct {
 	ID     uuid.UUID             `json:"id"`
