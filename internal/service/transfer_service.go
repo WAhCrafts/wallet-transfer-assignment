@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"strconv"
 	"time"
 
@@ -30,7 +31,18 @@ const (
 	// MaxIdempotencyKeyLength is the maximum allowed length for an idempotency key.
 	// Enforced in the handler before reaching the service.
 	MaxIdempotencyKeyLength = 255
+
+	// magicMinAmount is the minimum random deposit amount in cents (inclusive).
+	magicMinAmount domain.Amount = 100
+	// magicMaxAmount is the maximum random deposit amount in cents (inclusive).
+	magicMaxAmount domain.Amount = 10_000
 )
+
+// MagicRequest holds the input for a magic (random nature) deposit operation.
+type MagicRequest struct {
+	IdempotencyKey string
+	ToWalletID     uuid.UUID
+}
 
 // TransferRequest holds the input for a transfer operation.
 type TransferRequest struct {
@@ -297,6 +309,73 @@ func (s *TransferService) GetWallet(ctx context.Context, id uuid.UUID) (domain.W
 	}
 
 	return w, nil
+}
+
+// Magic executes a deposit from the nature wallet to the given destination
+// wallet for a randomly chosen amount in the range [100, 10 000] cents.
+//
+// The idempotency cache is consulted before the random amount is sampled so
+// that repeated calls with the same key always replay the exact amount that
+// was committed on the first call. In the rare concurrent race where two
+// goroutines both miss the pre-check and generate different amounts, Magic
+// reads the winning goroutine's committed record from the cache.
+func (s *TransferService) Magic(ctx context.Context, req MagicRequest) (TransferResponse, error) {
+	// Fast-path: return the cached response without generating a new amount.
+	if cached, err := s.idem.Get(ctx, s.db, req.IdempotencyKey); err == nil {
+		var resp TransferResponse
+		if jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp); jsonErr == nil {
+			resp.FromCache = true
+			s.log.Info("magic idempotency cache hit",
+				"layer", "svc",
+				"idempotencyKey", req.IdempotencyKey,
+				"transferID", cached.TransferID,
+			)
+
+			return resp, nil
+		}
+	}
+
+	amount := magicMinAmount + domain.Amount(rand.Int63n(int64(magicMaxAmount-magicMinAmount+1)))
+
+	resp, err := s.Execute(ctx, TransferRequest{
+		IdempotencyKey: req.IdempotencyKey,
+		FromWalletID:   domain.NatureWalletID,
+		ToWalletID:     req.ToWalletID,
+		Amount:         amount,
+	})
+
+	// Concurrent race: another goroutine won the INSERT with a different random
+	// amount, causing a hash mismatch inside Execute. Read the committed record.
+	if errors.Is(err, domain.ErrDuplicateIdempotencyKey) {
+		return s.waitForMagicRecord(ctx, req.IdempotencyKey)
+	}
+
+	return resp, err
+}
+
+// waitForMagicRecord polls the idempotency cache until the record committed by
+// the winning concurrent goroutine becomes visible, then returns it.
+func (s *TransferService) waitForMagicRecord(ctx context.Context, key string) (TransferResponse, error) {
+	for i := range idemMaxRetries {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return TransferResponse{}, ctx.Err()
+			case <-time.After(idemRetryDelay):
+			}
+		}
+
+		if cached, err := s.idem.Get(ctx, s.db, key); err == nil {
+			var resp TransferResponse
+			if jsonErr := json.Unmarshal([]byte(cached.ResponseJSON), &resp); jsonErr == nil {
+				resp.FromCache = true
+
+				return resp, nil
+			}
+		}
+	}
+
+	return TransferResponse{}, fmt.Errorf("svc: magic idempotency record not visible after race: key=%s", key)
 }
 
 // validate performs cheap, stateless input validation.

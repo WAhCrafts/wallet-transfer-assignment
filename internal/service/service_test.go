@@ -680,3 +680,104 @@ func TestTransferService_Execute_StatusInCachedJSON(t *testing.T) {
 		t.Fatalf("cached JSON should contain human-readable status, got: %s", rec.ResponseJSON)
 	}
 }
+
+// ── Magic ─────────────────────────────────────────────────────────────────────
+
+// TestTransferService_Magic_HappyPath verifies that Magic deposits a random
+// amount in the expected range and returns a PROCESSED transfer.
+func TestTransferService_Magic_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, ledger, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	// Seed the nature wallet with ample funds.
+	nature := domain.Wallet{ID: domain.NatureWalletID, Balance: 1_000_000}
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{nature.ID: nature, to.ID: to}
+
+	resp, err := svc.Magic(ctx, service.MagicRequest{
+		IdempotencyKey: "magic-001",
+		ToWalletID:     to.ID,
+	})
+	if err != nil {
+		t.Fatalf("Magic: %v", err)
+	}
+
+	if resp.Status != domain.TransferStatusProcessed {
+		t.Fatalf("expected PROCESSED, got %s", resp.Status)
+	}
+
+	// Amount must be within the allowed range [100, 10 000].
+	if resp.Amount < 100 || resp.Amount > 10_000 {
+		t.Fatalf("amount %d outside expected range [100, 10000]", resp.Amount)
+	}
+
+	// Exactly two ledger entries must be created.
+	if len(ledger.entries) != 2 {
+		t.Fatalf("expected 2 ledger entries, got %d", len(ledger.entries))
+	}
+}
+
+// TestTransferService_Magic_Idempotent verifies that repeating a Magic call
+// with the same idempotency key returns an identical response.
+func TestTransferService_Magic_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, _, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	nature := domain.Wallet{ID: domain.NatureWalletID, Balance: 1_000_000}
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{nature.ID: nature, to.ID: to}
+
+	req := service.MagicRequest{
+		IdempotencyKey: "magic-idem-001",
+		ToWalletID:     to.ID,
+	}
+
+	resp1, err := svc.Magic(ctx, req)
+	if err != nil {
+		t.Fatalf("first Magic: %v", err)
+	}
+
+	resp2, err := svc.Magic(ctx, req)
+	if err != nil {
+		t.Fatalf("second Magic: %v", err)
+	}
+
+	if resp1.TransferID != resp2.TransferID {
+		t.Fatal("idempotent repeat must return the same transfer ID")
+	}
+
+	if resp1.Amount != resp2.Amount {
+		t.Fatal("idempotent repeat must return the same amount")
+	}
+}
+
+// TestTransferService_Magic_FromNatureWallet verifies that the debit ledger
+// entry is always charged to domain.NatureWalletID, not some other wallet.
+func TestTransferService_Magic_FromNatureWallet(t *testing.T) {
+	t.Parallel()
+
+	svc, _, wallets, _, ledger, _ := newServiceWithFakes()
+	ctx := context.Background()
+
+	nature := domain.Wallet{ID: domain.NatureWalletID, Balance: 1_000_000}
+	to := domain.NewWallet()
+	wallets.wallets = map[uuid.UUID]domain.Wallet{nature.ID: nature, to.ID: to}
+
+	if _, err := svc.Magic(ctx, service.MagicRequest{
+		IdempotencyKey: "magic-from-001",
+		ToWalletID:     to.ID,
+	}); err != nil {
+		t.Fatalf("Magic: %v", err)
+	}
+
+	for _, e := range ledger.entries {
+		if e.Type == domain.EntryTypeDebit && e.WalletID != domain.NatureWalletID {
+			t.Fatalf("debit entry wallet %s must equal NatureWalletID", e.WalletID)
+		}
+	}
+}
+
